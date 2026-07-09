@@ -1,7 +1,10 @@
 package gnu.client.runtime.packet;
 
 import gnu.client.common.GnuLog;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
+import net.minecraft.client.network.NetHandlerPlayClient;
+import net.minecraft.network.Packet;
+import net.minecraft.network.play.client.C0APacketAnimation;
 
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -31,22 +34,20 @@ public final class PacketUtil {
      * Released lag FIFO packets: {@code addToSendQueue} path + fast-track (raven {@code goThrough}).
      */
     public static void sendPacketReleased(Object packet) {
-        if (packet == null)
+        if (!(packet instanceof Packet))
             return;
         SEND_FAST_TRACK.add(packet);
-        McAccess.addToSendQueue(packet);
+        Mc.addToSendQueue((Packet<?>) packet);
     }
 
     public static void sendPacket(Object packet) {
-        if (packet == null)
+        if (!(packet instanceof Packet))
             return;
         try {
             DISPATCHING.set(Boolean.TRUE);
-            Object mc = McAccess.getMinecraft();
-            Object netHandler = McAccess.getNetHandler(mc);
-            Object networkManager = McAccess.getNetworkManager(netHandler);
-            McAccess.invoke(networkManager, "func_179290_a",
-                    new Class<?>[] { McAccess.gameClass("net.minecraft.network.Packet") }, packet);
+            NetHandlerPlayClient netHandler = Mc.netHandler();
+            if (netHandler != null)
+                netHandler.getNetworkManager().sendPacket((Packet) packet);
         } catch (Throwable t) {
             GnuLog.log("JAVA_ PacketUtil.sendPacket: " + t);
         } finally {
@@ -56,26 +57,18 @@ public final class PacketUtil {
 
     /** Resync swing immediately before a delayed {@code C02 ATTACK} (Vulcan BadPackets). */
     public static void sendSwingAnimation() {
-        Object packet = McAccess.newInstance(
-                "net.minecraft.network.play.client.C0APacketAnimation",
-                new Class<?>[0]);
-        if (packet != null)
-            sendPacket(packet);
+        sendPacket(new C0APacketAnimation());
     }
 
     public static void processInbound(Object packet) {
-        if (packet == null)
+        if (!(packet instanceof Packet))
             return;
-        Object netHandler = McAccess.getNetHandler(McAccess.getMinecraft());
+        NetHandlerPlayClient netHandler = Mc.netHandler();
         if (netHandler == null)
             return;
         try {
             DISPATCHING.set(Boolean.TRUE);
-            Object result = McAccess.invoke(packet, "func_148833_a",
-                    new Class<?>[] { McAccess.gameClass("net.minecraft.network.INetHandler") }, netHandler);
-            if (result == null)
-                McAccess.invokeNamed(packet, "processPacket",
-                        new Class<?>[] { McAccess.gameClass("net.minecraft.network.INetHandler") }, netHandler);
+            ((Packet) packet).processPacket(netHandler);
         } catch (Throwable t) {
             GnuLog.log("JAVA_ PacketUtil.processInbound: " + t);
         } finally {

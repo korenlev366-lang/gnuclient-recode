@@ -1,25 +1,23 @@
 package gnu.client.module.modules.visual;
 
-import gnu.client.common.GnuLog;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.util.RenderHelper;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockBed;
+import net.minecraft.block.state.IBlockState;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.multiplayer.WorldClient;
+import net.minecraft.util.BlockPos;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Highlights bed blocks near the player with configurable max distance (default 64).
- *
- * <p>Scans for {@code BlockBed} instances within the configured range.
- * Uses {@link McAccess#gameClass} for class resolution to handle both
- * MCP/SRG and fully obfuscated notch runtimes. Falls back to simple-name
- * matching when the class cannot be loaded by name.</p>
  */
 public final class BedEspModule extends Module {
 
@@ -35,12 +33,6 @@ public final class BedEspModule extends Module {
     private int ticksSinceScan = SCAN_INTERVAL;
     private final List<long[]> bedCache = new ArrayList<>();
 
-    private Constructor<?> cachedBpCtor;
-    private Method cachedGetBlockState;
-    private Method cachedGetBlock;
-    private Class<?> bedBlockClass;
-    private boolean reflectionFailed;
-
     public BedEspModule() {
         super("BedESP", "Highlight nearby beds with configurable max distance", Category.VISUALS);
     }
@@ -49,16 +41,11 @@ public final class BedEspModule extends Module {
     public void onEnable() {
         ticksSinceScan = SCAN_INTERVAL;
         bedCache.clear();
-        reflectionFailed = false;
     }
 
     @Override
     public void onDisable() {
         bedCache.clear();
-        cachedBpCtor = null;
-        cachedGetBlockState = null;
-        cachedGetBlock = null;
-        bedBlockClass = null;
     }
 
     @Override
@@ -68,24 +55,20 @@ public final class BedEspModule extends Module {
             return;
         ticksSinceScan = 0;
 
-        Object player = McAccess.thePlayer();
-        Object world = McAccess.theWorld();
+        EntityPlayerSP player = Mc.player();
+        WorldClient world = Mc.world();
         if (player == null || world == null)
             return;
 
-        double px = McAccess.entityPosX(player);
-        double py = McAccess.entityPosY(player);
-        double pz = McAccess.entityPosZ(player);
+        double px = player.posX;
+        double py = player.posY;
+        double pz = player.posZ;
         double maxDistSq = maxDist.getValue() * maxDist.getValue();
         int hr = (int) Math.ceil(maxDist.getValue());
 
         int ipx = (int) Math.floor(px);
         int ipy = (int) Math.floor(py);
         int ipz = (int) Math.floor(pz);
-
-        ensureReflectionCache(world);
-        if (reflectionFailed)
-            return;
 
         bedCache.clear();
 
@@ -98,98 +81,17 @@ public final class BedEspModule extends Module {
                     if (dx * dx + dy * dy + dz * dz > maxDistSq)
                         continue;
 
-                    try {
-                        Object bp = cachedBpCtor.newInstance(x, y, z);
-                        Object state = cachedGetBlockState.invoke(world, bp);
-                        if (state == null)
-                            continue;
-                        Object block = cachedGetBlock.invoke(state);
-                        if (block == null)
-                            continue;
-                        if (isBedBlock(block)) {
-                            bedCache.add(packXYZ(x, y, z));
-                        }
-                    } catch (Exception ignored) {
+                    BlockPos bp = new BlockPos(x, y, z);
+                    IBlockState state = world.getBlockState(bp);
+                    if (state == null)
+                        continue;
+                    Block block = state.getBlock();
+                    if (block instanceof BlockBed) {
+                        bedCache.add(packXYZ(x, y, z));
                     }
                 }
             }
         }
-    }
-
-    private void ensureReflectionCache(Object world) {
-        if (reflectionFailed)
-            return;
-
-        Class<?> bpClass = McAccess.gameClass("net.minecraft.util.BlockPos");
-        if (bpClass == null) {
-            reflectionFailed = true;
-            return;
-        }
-
-        if (cachedBpCtor == null) {
-            try {
-                cachedBpCtor = bpClass.getDeclaredConstructor(int.class, int.class, int.class);
-                cachedBpCtor.setAccessible(true);
-            } catch (Exception e) {
-                GnuLog.log("BedESP: BlockPos ctor failed: " + e);
-                reflectionFailed = true;
-                return;
-            }
-        }
-
-        if (cachedGetBlockState == null) {
-            for (Class<?> c = world.getClass(); c != null; c = c.getSuperclass()) {
-                try {
-                    cachedGetBlockState = c.getDeclaredMethod("func_180495_p", bpClass);
-                    cachedGetBlockState.setAccessible(true);
-                    break;
-                } catch (NoSuchMethodException ignored) {
-                }
-            }
-            if (cachedGetBlockState == null) {
-                reflectionFailed = true;
-                return;
-            }
-        }
-
-        if (cachedGetBlock == null) {
-            Class<?> stateClass = McAccess.gameClass("net.minecraft.block.state.IBlockState");
-            if (stateClass == null) {
-                reflectionFailed = true;
-                return;
-            }
-            for (Class<?> c = stateClass; c != null; c = c.getSuperclass()) {
-                try {
-                    cachedGetBlock = c.getDeclaredMethod("func_177230_c");
-                    cachedGetBlock.setAccessible(true);
-                    break;
-                } catch (NoSuchMethodException ignored) {
-                }
-            }
-            if (cachedGetBlock == null) {
-                reflectionFailed = true;
-                return;
-            }
-        }
-
-        if (bedBlockClass == null) {
-            bedBlockClass = McAccess.gameClass("net.minecraft.block.BlockBed");
-        }
-    }
-
-    /**
-     * Check if a block object is a bed. Uses {@link Class#isInstance} when
-     * the class resolved successfully; falls back to simple-name matching
-     * (e.g. {@code "BlockBed"}, or notch names like {@code "aaw"}) for
-     * fully obfuscated runtimes where the class may not be loadable by MCP name.
-     */
-    private boolean isBedBlock(Object block) {
-        if (block == null)
-            return false;
-        if (bedBlockClass != null)
-            return bedBlockClass.isInstance(block);
-        String name = block.getClass().getSimpleName();
-        return name.contains("BlockBed") || name.contains("Bed");
     }
 
     private static long[] packXYZ(int x, int y, int z) {
@@ -204,10 +106,10 @@ public final class BedEspModule extends Module {
         if (bedCache.isEmpty())
             return;
 
-        Object mc = McAccess.getMinecraft();
-        if (mc == null)
+        if (!Mc.isInGame())
             return;
-        double[] vp = McAccess.getViewerPos(mc, partialTicks);
+
+        double[] vp = Mc.getViewerPos(partialTicks);
         double rvpX = vp[0];
         double rvpY = vp[1];
         double rvpZ = vp[2];

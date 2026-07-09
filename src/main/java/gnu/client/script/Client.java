@@ -1,17 +1,17 @@
 package gnu.client.script;
 
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
+import net.minecraft.entity.Entity;
+import net.minecraft.util.MovingObjectPosition;
 
 /**
  * Script-facing {@code client} accessor — a stateless singleton facade over
- * {@link McAccess}. Exposes the local player, wall-clock time, and a
- * player-eye raycast to script bodies without any {@code net.minecraft.*}
- * compile-time reference.
+ * {@link Mc}. Exposes the local player, wall-clock time, and a player-eye
+ * raycast to script bodies.
  *
  * <p>This class holds NO game-object state across calls (no cached player/world
- * fields). Every method re-resolves through {@code McAccess} so the script
- * class remains unloadable when its module is disabled — see the leak-risk
- * constraint in the scripting feasibility report.
+ * fields). Every method re-resolves through {@code Mc} so the script class
+ * remains unloadable when its module is disabled.
  */
 public final class Client {
 
@@ -19,9 +19,9 @@ public final class Client {
 
     private Client() {}
 
-    /** The local {@code EntityPlayerSP} as a raw Object, or {@code null} if not in-game. */
+    /** The local {@code EntityPlayerSP}, or {@code null} if not in-game. */
     public Object getPlayer() {
-        return McAccess.thePlayer();
+        return Mc.player();
     }
 
     /** Wall-clock millis ({@code System.currentTimeMillis()}). */
@@ -32,196 +32,197 @@ public final class Client {
     /**
      * Ray-cast from the local player's eyes along the given yaw/pitch, returning
      * the {@code MovingObjectPosition} (or {@code null} on miss / no world).
-     *
-     * @param distance reach distance in blocks
-     * @param yaw      player yaw in degrees
-     * @param pitch    player pitch in degrees
      */
     public Object raycastBlock(double distance, float yaw, float pitch) {
-        return McAccess.raycastBlocks(distance, yaw, pitch);
+        MovingObjectPosition hit = Mc.raycastBlocks(distance, yaw, pitch);
+        return hit;
     }
 
     public double getMotionX() {
-        return McAccess.getMotionX();
+        return Mc.getMotionX();
     }
 
     public double getMotionY() {
-        return McAccess.getMotionY();
+        return Mc.getMotionY();
     }
 
     public double getMotionZ() {
-        return McAccess.getMotionZ();
+        return Mc.getMotionZ();
     }
 
     public float getYaw() {
-        return McAccess.getYaw();
+        return Mc.getYaw();
     }
 
     public float getPitch() {
-        return McAccess.getPitch();
+        return Mc.getPitch();
     }
 
     public boolean isOnGround() {
-        return McAccess.isOnGround();
+        return Mc.isOnGround();
     }
 
     public boolean isSneaking() {
-        return McAccess.isSneaking();
+        return Mc.isSneaking();
     }
 
     public boolean isSprinting() {
-        return McAccess.isClientSprinting();
+        return Mc.isClientSprinting();
     }
 
     public float getTimerSpeed() {
-        return McAccess.getTimerSpeed();
+        return Mc.getTimerSpeed();
     }
 
     public void setTimerSpeed(float speed) {
-        McAccess.setTimerSpeed(speed);
+        Mc.setTimerSpeed(speed);
     }
 
     public void resetTimer() {
-        McAccess.resetTimer();
+        Mc.resetTimer();
     }
 
     public void setRotation(float yaw, float pitch) {
-        McAccess.setRotation(yaw, pitch);
+        Mc.setRotation(yaw, pitch);
     }
 
     public void setMotion(double x, double y, double z) {
-        McAccess.setMotion(x, y, z);
+        Mc.setMotion(x, y, z);
     }
 
     public double getPosX() {
-        Object player = getPlayer();
-        return player == null ? 0.0 : McAccess.entityPosX(player);
+        return Mc.entityPosX(Mc.player());
     }
 
     public double getPosY() {
-        Object player = getPlayer();
-        return player == null ? 0.0 : McAccess.entityPosY(player);
+        return Mc.entityPosY(Mc.player());
     }
 
     public double getPosZ() {
-        Object player = getPlayer();
-        return player == null ? 0.0 : McAccess.entityPosZ(player);
+        return Mc.entityPosZ(Mc.player());
     }
 
     /** Drive vanilla jump input (MovementInput.jump + keyBindJump state). */
     public void setJump(boolean jump) {
-        McAccess.setJumpInput(getPlayer(), jump);
+        Mc.setJumpInput(Mc.player(), jump);
     }
 
     public boolean isRiding() {
-        return McAccess.isRiding();
+        return Mc.isRiding();
     }
 
     /** Riding entity ({@code Entity}) or null. */
     public Object getRidingEntity() {
-        return McAccess.getRidingEntity(getPlayer());
+        return Mc.getRidingEntity(Mc.player());
     }
 
     public void setRidingMotion(double x, double y, double z) {
-        McAccess.setEntityMotion(getRidingEntity(), x, y, z);
+        Mc.setEntityMotion(asEntity(getRidingEntity()), x, y, z);
     }
 
     public double entityPosX(Object entity) {
-        return entity == null ? 0.0 : McAccess.entityPosX(entity);
+        return Mc.entityPosX(asEntity(entity));
     }
 
     public double entityPosY(Object entity) {
-        return entity == null ? 0.0 : McAccess.entityPosY(entity);
+        return Mc.entityPosY(asEntity(entity));
     }
 
     public double entityPosZ(Object entity) {
-        return entity == null ? 0.0 : McAccess.entityPosZ(entity);
+        return Mc.entityPosZ(asEntity(entity));
     }
 
     public void setEntityPosition(Object entity, double x, double y, double z) {
-        McAccess.setEntityPosition(entity, x, y, z);
+        Mc.setEntityPosition(asEntity(entity), x, y, z);
     }
 
     public void setEntityVelocity(Object entity, double x, double y, double z) {
-        McAccess.setEntityVelocity(entity, x, y, z);
+        Mc.setEntityVelocity(asEntity(entity), x, y, z);
     }
 
     public void setEntityYaw(Object entity, float yaw) {
-        McAccess.setEntityYaw(entity, yaw);
+        Mc.setEntityYaw(asEntity(entity), yaw);
     }
 
     /** {@code C0C} steer packet for mounted vehicles (boat/horse/pig/minecart). */
     public void sendSteer(float strafe, float forward, boolean jump, boolean unmount) {
-        McAccess.sendSteerVehicle(strafe, forward, jump, unmount);
+        Mc.sendSteerVehicle(strafe, forward, jump, unmount);
     }
 
     /** {@code C07 RELEASE_USE_ITEM} — clears server item-use slow while eating/blocking. */
     public void releaseUseItem() {
-        McAccess.sendReleaseUseItem(getPlayer());
+        Mc.sendReleaseUseItem(Mc.player());
     }
 
     /** {@code C09} hotbar slot flick (brief slot swap to reset use state). */
     public void heldItemChangeFlicker() {
-        McAccess.sendHeldItemChangeFlicker();
+        Mc.sendHeldItemChangeFlicker();
     }
 
     public void setSprintKey(boolean pressed) {
-        McAccess.setSprintKeyState(pressed);
+        Mc.setSprintKeyState(pressed);
     }
 
     public void setForwardKey(boolean pressed) {
-        McAccess.setForwardKeyState(pressed);
+        Mc.setForwardKeyState(pressed);
     }
 
     public void setBackKey(boolean pressed) {
-        McAccess.setBackKeyState(pressed);
+        Mc.setBackKeyState(pressed);
     }
 
     public void setLeftKey(boolean pressed) {
-        McAccess.setLeftKeyState(pressed);
+        Mc.setLeftKeyState(pressed);
     }
 
     public void setRightKey(boolean pressed) {
-        McAccess.setRightKeyState(pressed);
+        Mc.setRightKeyState(pressed);
     }
 
     /** Override {@code MovementInput} after vanilla key read (script {@code patchMovementInput} hook). */
     public void setMovementInput(Object movInput, float moveForward, float moveStrafe, boolean jump) {
-        McAccess.setMovementInput(movInput, moveForward, moveStrafe, jump);
+        if (movInput instanceof net.minecraft.util.MovementInput) {
+            Mc.setMovementInput((net.minecraft.util.MovementInput) movInput,
+                    moveForward, moveStrafe, jump);
+        }
     }
 
     /** {@code EntityLivingBase.setSprinting} — pairs with forward movement for bhop speed. */
     public void setSprinting(boolean sprinting) {
-        McAccess.setClientSprinting(getPlayer(), sprinting);
+        Mc.setClientSprinting(Mc.player(), sprinting);
     }
 
     /** Force local onGround after setback snap (pairs with C03 ground sync). */
     public void setOnGround(boolean onGround) {
-        McAccess.setOnGround(getPlayer(), onGround);
+        Mc.setOnGround(Mc.player(), onGround);
     }
 
     /** Teleport local player to world coords (micro-step / blink fly). */
     public void setPlayerPosition(double x, double y, double z) {
-        McAccess.setEntityPosition(getPlayer(), x, y, z);
+        Mc.setEntityPosition(Mc.player(), x, y, z);
     }
 
     /** Packet sprint state the server last ack'd ({@code serverSprintState}). */
     public boolean isServerSprinting() {
-        return McAccess.getServerSprintState();
+        return Mc.getServerSprintState();
     }
 
     /** {@code C0B START_SPRINTING} when server thinks we are not sprinting. */
     public void sendSprintStart() {
-        McAccess.sendSprintActionPacket(getPlayer(), true);
+        Mc.sendSprintActionPacket(Mc.player(), true);
     }
 
     /** {@code C0B STOP_SPRINTING} when server thinks we are sprinting. */
     public void sendSprintStop() {
-        McAccess.sendSprintActionPacket(getPlayer(), false);
+        Mc.sendSprintActionPacket(Mc.player(), false);
     }
 
     /** {@code PlayerControllerMP.attackEntity} — real C02 to server. */
     public boolean attackEntity(Object entity) {
-        return McAccess.attackEntity(entity);
+        return Mc.attackEntity(asEntity(entity));
+    }
+
+    private static Entity asEntity(Object entity) {
+        return entity instanceof Entity ? (Entity) entity : null;
     }
 }

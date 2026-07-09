@@ -2,7 +2,8 @@ package gnu.client.module.modules.movement;
 
 import gnu.client.module.Category;
 import gnu.client.module.Module;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
+import net.minecraft.client.entity.EntityPlayerSP;
 
 import java.util.Arrays;
 import java.util.List;
@@ -17,11 +18,6 @@ public final class FastStopModule extends Module {
     private static final double VELOCITY_STOP_THRESHOLD = 0.01;
     private static final int LEGIT_HOLD_TICKS = 1;
     private static final int HOLD_UNTIL_STOP = -1; // blatant: hold opposite key until velocity < 0.01
-
-    private static final String KEY_FORWARD = "field_74351_w";
-    private static final String KEY_BACK = "field_74368_y"; // keyBindBack
-    private static final String KEY_LEFT = "field_74370_x";
-    private static final String KEY_RIGHT = "field_74366_z";
 
     private final gnu.client.module.setting.ModeSetting mode =
             addSetting(new gnu.client.module.setting.ModeSetting("Mode", 1, MODES));
@@ -57,7 +53,7 @@ public final class FastStopModule extends Module {
         if (!isEnabled())
             return;
 
-        if (McAccess.currentScreen() != null) {
+        if (Mc.currentScreen() != null) {
             resetHolds();
             restorePhysicalMovementKeys();
             syncPhysicalKeys();
@@ -73,10 +69,10 @@ public final class FastStopModule extends Module {
     private void cancelHoldsOnUserInput() {
         if (!hasActiveHold())
             return;
-        if (McAccess.isPhysicalKeyBindDown(KEY_FORWARD)
-                || McAccess.isPhysicalKeyBindDown(KEY_BACK)
-                || McAccess.isPhysicalKeyBindDown(KEY_LEFT)
-                || McAccess.isPhysicalKeyBindDown(KEY_RIGHT)) {
+        if (Mc.isForwardKeyHeld()
+                || Mc.isBackKeyHeld()
+                || Mc.isLeftKeyHeld()
+                || Mc.isRightKeyHeld()) {
             resetHolds();
             restorePhysicalMovementKeys();
         }
@@ -86,53 +82,63 @@ public final class FastStopModule extends Module {
         if (!hasHorizontalVelocity())
             return;
 
-        boolean forward = McAccess.isPhysicalKeyBindDown(KEY_FORWARD);
-        boolean back = McAccess.isPhysicalKeyBindDown(KEY_BACK);
-        boolean left = McAccess.isPhysicalKeyBindDown(KEY_LEFT);
-        boolean right = McAccess.isPhysicalKeyBindDown(KEY_RIGHT);
+        boolean forward = Mc.isForwardKeyHeld();
+        boolean back = Mc.isBackKeyHeld();
+        boolean left = Mc.isLeftKeyHeld();
+        boolean right = Mc.isRightKeyHeld();
 
         if (physicalForward && !forward)
-            startOppositeHold(KEY_BACK);
+            startOppositeHold(OppositeKey.BACK);
         if (physicalBack && !back)
-            startOppositeHold(KEY_FORWARD);
+            startOppositeHold(OppositeKey.FORWARD);
         if (physicalLeft && !left && !physicalRight)
-            startOppositeHold(KEY_RIGHT);
+            startOppositeHold(OppositeKey.RIGHT);
         if (physicalRight && !right && !physicalLeft)
-            startOppositeHold(KEY_LEFT);
+            startOppositeHold(OppositeKey.LEFT);
     }
 
-    private void startOppositeHold(String oppositeKey) {
+    private enum OppositeKey { FORWARD, BACK, LEFT, RIGHT }
+
+    private void startOppositeHold(OppositeKey oppositeKey) {
         int ticks = isLegit() ? LEGIT_HOLD_TICKS : HOLD_UNTIL_STOP;
-        if (KEY_BACK.equals(oppositeKey))
-            holdBackTicks = ticks;
-        else if (KEY_FORWARD.equals(oppositeKey))
-            holdForwardTicks = ticks;
-        else if (KEY_LEFT.equals(oppositeKey))
-            holdLeftTicks = ticks;
-        else if (KEY_RIGHT.equals(oppositeKey))
-            holdRightTicks = ticks;
+        switch (oppositeKey) {
+            case BACK:
+                holdBackTicks = ticks;
+                break;
+            case FORWARD:
+                holdForwardTicks = ticks;
+                break;
+            case LEFT:
+                holdLeftTicks = ticks;
+                break;
+            case RIGHT:
+                holdRightTicks = ticks;
+                break;
+            default:
+                break;
+        }
     }
 
     private void applyHoldKeybinds() {
         if (holdForwardTicks > 0 || holdForwardTicks == HOLD_UNTIL_STOP)
-            McAccess.setForwardKeyState(true);
+            Mc.setForwardKeyState(true);
         else
-            McAccess.setForwardKeyState(McAccess.isPhysicalKeyBindDown(KEY_FORWARD));
+            Mc.setForwardKeyState(Mc.isForwardKeyHeld());
 
         if (holdBackTicks > 0 || holdBackTicks == HOLD_UNTIL_STOP)
-            McAccess.setBackKeyState(true);
+            Mc.setBackKeyState(true);
         else
-            McAccess.setBackKeyState(McAccess.isPhysicalKeyBindDown(KEY_BACK));
+            Mc.setBackKeyState(Mc.isBackKeyHeld());
 
         if (holdLeftTicks > 0 || holdLeftTicks == HOLD_UNTIL_STOP)
-            McAccess.setLeftKeyState(true);
+            Mc.setLeftKeyState(true);
         else
-            McAccess.setLeftKeyState(McAccess.isPhysicalKeyBindDown(KEY_LEFT));
+            Mc.setLeftKeyState(Mc.isLeftKeyHeld());
 
         if (holdRightTicks > 0 || holdRightTicks == HOLD_UNTIL_STOP)
-            McAccess.setRightKeyState(true);
+            Mc.setRightKeyState(true);
         else
-            McAccess.setRightKeyState(McAccess.isPhysicalKeyBindDown(KEY_RIGHT));
+            Mc.setRightKeyState(Mc.isRightKeyHeld());
 
         // Decrement tick-based holds; check velocity for HOLD_UNTIL_STOP
         if (holdForwardTicks == HOLD_UNTIL_STOP) {
@@ -173,27 +179,25 @@ public final class FastStopModule extends Module {
     }
 
     private boolean hasHorizontalVelocity() {
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null)
             return false;
-        double motionX = McAccess.getDouble(player, "field_70159_w");
-        double motionZ = McAccess.getDouble(player, "field_70179_y");
-        return Math.abs(motionX) >= VELOCITY_STOP_THRESHOLD
-                || Math.abs(motionZ) >= VELOCITY_STOP_THRESHOLD;
+        return Math.abs(player.motionX) >= VELOCITY_STOP_THRESHOLD
+                || Math.abs(player.motionZ) >= VELOCITY_STOP_THRESHOLD;
     }
 
     private void syncPhysicalKeys() {
-        physicalForward = McAccess.isPhysicalKeyBindDown(KEY_FORWARD);
-        physicalBack = McAccess.isPhysicalKeyBindDown(KEY_BACK);
-        physicalLeft = McAccess.isPhysicalKeyBindDown(KEY_LEFT);
-        physicalRight = McAccess.isPhysicalKeyBindDown(KEY_RIGHT);
+        physicalForward = Mc.isForwardKeyHeld();
+        physicalBack = Mc.isBackKeyHeld();
+        physicalLeft = Mc.isLeftKeyHeld();
+        physicalRight = Mc.isRightKeyHeld();
     }
 
     private void restorePhysicalMovementKeys() {
-        McAccess.setForwardKeyState(McAccess.isPhysicalKeyBindDown(KEY_FORWARD));
-        McAccess.setBackKeyState(McAccess.isPhysicalKeyBindDown(KEY_BACK));
-        McAccess.setLeftKeyState(McAccess.isPhysicalKeyBindDown(KEY_LEFT));
-        McAccess.setRightKeyState(McAccess.isPhysicalKeyBindDown(KEY_RIGHT));
+        Mc.setForwardKeyState(Mc.isForwardKeyHeld());
+        Mc.setBackKeyState(Mc.isBackKeyHeld());
+        Mc.setLeftKeyState(Mc.isLeftKeyHeld());
+        Mc.setRightKeyState(Mc.isRightKeyHeld());
     }
 
     private void resetHolds() {

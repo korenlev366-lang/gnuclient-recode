@@ -1,5 +1,7 @@
 package gnu.client.module.modules.player;
 
+import gnu.client.mixin.impl.accessors.IAccessorMinecraft;
+import gnu.client.mixin.impl.accessors.IAccessorTimer;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.setting.BoolSetting;
@@ -9,23 +11,37 @@ import gnu.client.runtime.MoveFixUtil;
 import gnu.client.runtime.PlayerUpdateHook;
 import gnu.client.runtime.RotationState;
 import gnu.client.runtime.ScaffoldItemSpoofHook;
-import gnu.client.runtime.mc.McAccess;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
+import gnu.client.utility.IMinecraftInstance;
+import gnu.client.utility.PacketUtils;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.multiplayer.WorldClient;
+import net.minecraft.client.settings.KeyBinding;
+import net.minecraft.item.ItemBlock;
+import net.minecraft.item.ItemStack;
+import net.minecraft.network.play.client.C09PacketHeldItemChange;
+import net.minecraft.util.AxisAlignedBB;
+import net.minecraft.util.BlockPos;
+import net.minecraft.util.EnumFacing;
+import net.minecraft.util.MathHelper;
+import net.minecraft.util.MovementInput;
+import net.minecraft.util.Vec3;
+import net.minecraft.world.World;
 
 import java.util.Arrays;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * OpenMyau-style 1.8.9 scaffold port.
+ * OpenMyau-style 1.8.9 scaffold — direct Forge MCP APIs (no McAccess reflection).
  *
- * <p>This intentionally avoids the previous packet/silent-rotation pipeline.
- * It uses the same basic flow as OpenMyau: find support block, find/calculate a
- * face hit vec, request the OpenMyau-style pre-motion rotation, then place
- * through vanilla PlayerControllerMP.onPlayerRightClick.
+ * <p>Place contract: getBlockData → aim → snapMovementFacingYaw → applyRotation →
+ * place when {@code blockData != null && rotationTick <= 0} only if the
+ * <b>sent</b> look ray hits the support (Grim RotationPlace). Deferred place via
+ * {@link #beforeWalkingPlace} keeps C08 before C03.
  */
-public final class ScaffoldModule extends Module implements PacketListener {
+public final class ScaffoldModule extends Module implements PacketListener, IMinecraftInstance {
 
   private static final int ROT_NONE = 0;
   private static final int ROT_DEFAULT = 1;
@@ -62,7 +78,8 @@ public final class ScaffoldModule extends Module implements PacketListener {
 
   private final ModeSetting rotationMode = addSetting(new ModeSetting("rotations", ROT_BACKWARDS,
       Arrays.asList("NONE", "DEFAULT", "BACKWARDS", "SIDEWAYS", "GODBRIDGE", "SMOOTH")));
-  private final SliderSetting rotationSpeed = addSetting(new SliderSetting("rotation-speed", 45.0f, 1.0f, 180.0f));
+  // Default 180 = instant snap (OpenMyau-like). Lower values step and delay place via rotationTick.
+  private final SliderSetting rotationSpeed = addSetting(new SliderSetting("rotation-speed", 180.0f, 1.0f, 180.0f));
   private final ModeSetting moveFix = addSetting(new ModeSetting("move-fix", MOVEFIX_SILENT,
       Arrays.asList("NONE", "SILENT")));
   private final ModeSetting sprintMode = addSetting(new ModeSetting("sprint", SPRINT_NONE,
@@ -127,7 +144,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
   private boolean tellyDoNotAimActive;
   private boolean tellyDoNotAimWasActive;
   private boolean tellyRotTransition;
-  private Object cycleWorld;
+  private World cycleWorld;
   private boolean cyclePrioritizePlacement;
   private boolean cycleAllowTellyAirPlacement;
   private float lastSentYaw = Float.MIN_VALUE;
@@ -135,8 +152,11 @@ public final class ScaffoldModule extends Module implements PacketListener {
   private float steppedServerYaw = Float.NaN;
   private float steppedServerPitch = Float.NaN;
   private ScaffoldPlacement.BlockData pendingBlockData;
-  private Object pendingHit;
+  private Vec3 pendingHit;
   private boolean pendingPlace;
+  /** Yaw/pitch used when {@link #pendingHit} was queued (must match place-time lastSent). */
+  private float pendingHitYaw = Float.MIN_VALUE;
+  private float pendingHitPitch;
   private float lastSentPitch;
   private float prevSentYaw = Float.MIN_VALUE;
   private float prevSentPitch;
@@ -155,8 +175,8 @@ public final class ScaffoldModule extends Module implements PacketListener {
 
   @Override
   public void onEnable() {
-    Object player = McAccess.thePlayer();
-    lastSlot = player == null ? -1 : McAccess.getHotbarSlot(player);
+    EntityPlayerSP player = mc.thePlayer;
+    lastSlot = player == null ? -1 : player.inventory.currentItem;
     serverReportedSlot = lastSlot;
     blockSlot = -1;
     pendingServerSlot = -1;
@@ -167,7 +187,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
     canRotate = false;
     resetTowerState();
     stage = 0;
-    startY = player == null ? 256 : floor(McAccess.entityPosY(player));
+    startY = player == null ? 256 : MathHelper.floor_double(player.posY);
     shouldKeepY = false;
     towering = false;
     targetFacing = -1;
@@ -194,11 +214,11 @@ public final class ScaffoldModule extends Module implements PacketListener {
 
   @Override
   public void onDisable() {
-    Object player = McAccess.thePlayer();
+    EntityPlayerSP player = mc.thePlayer;
     if (player != null && lastSlot >= 0 && lastSlot <= 8) {
-      McAccess.setHotbarSlot(player, lastSlot);
+      player.inventory.currentItem = lastSlot;
       notifyServerSlot(lastSlot);
-      McAccess.setSneaking(player, false);
+      player.setSneaking(false);
     }
     serverReportedSlot = -1;
     blockSlot = -1;
@@ -220,7 +240,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
     RotationState.reset();
     clearPendingPlacement();
     resetTowerState();
-    McAccess.resetTimer();
+    setTimerSpeed(1.0f);
     PacketEvents.unregister(this);
   }
 
@@ -230,7 +250,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
   }
 
   private void runScaffoldCycle(boolean deferPlacement) {
-    if (!McAccess.isInGame() || McAccess.currentScreen() != null) {
+    if (mc.thePlayer == null || mc.theWorld == null || mc.currentScreen != null) {
       scaffoldCycleTick = -1;
       forceSneak = false;
       forceJump = false;
@@ -241,20 +261,10 @@ public final class ScaffoldModule extends Module implements PacketListener {
       return;
     }
 
-    Object player = McAccess.thePlayer();
-    Object world = McAccess.theWorld();
-    if (player == null || world == null) {
-      scaffoldCycleTick = -1;
-      forceSneak = false;
-      forceJump = false;
-      clearPendingPlacement();
-      clearRotationState();
-      resetSteppedRotation();
-      RotationState.applyState(false, 0.0f, 0.0f, 0.0f, -1);
-      return;
-    }
+    EntityPlayerSP player = mc.thePlayer;
+    WorldClient world = mc.theWorld;
 
-    int tick = McAccess.getInt(player, "field_70173_aa");
+    int tick = player.ticksExisted;
     if (tick == scaffoldCycleTick)
       return;
     scaffoldCycleTick = tick;
@@ -293,7 +303,8 @@ public final class ScaffoldModule extends Module implements PacketListener {
     else
       prepareBaseRotation(player);
 
-    ScaffoldPlacement.BlockData blockData = ScaffoldPlacement.getBlockData(player, world, startY, stage, shouldKeepY);
+    ScaffoldPlacement.BlockData blockData =
+        ScaffoldPlacement.getBlockData(player, world, startY, stage, shouldKeepY);
     ScaffoldPlacement.AimData aimData = null;
     if (blockData != null && (!tellyDoNotAim || allowTellyAirPlacement)) {
       aimData = resolveBlockAim(player, blockData, pitch);
@@ -303,6 +314,15 @@ public final class ScaffoldModule extends Module implements PacketListener {
         hasExactBlockAim = true;
         if (rotationMode.getValue() != ROT_NONE)
           canRotate = true;
+      } else if (rotationMode.getValue() != ROT_NONE && canRotate) {
+        // Aim grid missed (common while walking forward after snap) — still aim at
+        // face-center so we have a place hitVec like OpenMyau getClickVec fallback.
+        aimData = ScaffoldPlacement.aimAtFaceCenter(blockData, yaw, pitch);
+        if (aimData != null) {
+          yaw = aimData.yaw;
+          pitch = aimData.pitch;
+          hasExactBlockAim = false;
+        }
       }
     }
 
@@ -319,64 +339,61 @@ public final class ScaffoldModule extends Module implements PacketListener {
     applySprint(player);
 
     if (targetFacing >= 0 && rotationTick <= 0 && placementsThisTick < maxPlacementsPerTick()) {
-      int bx = floor(McAccess.entityPosX(player));
-      int by = floor(McAccess.entityPosY(player)) - 1;
-      int bz = floor(McAccess.entityPosZ(player));
-      Object pos = McAccess.newInstance("net.minecraft.util.BlockPos",
-          new Class<?>[] {int.class, int.class, int.class}, bx, by, bz);
-      if (validatedPlacementHit(player, pos, targetFacing) != null)
-        executePlacement(player, pos, targetFacing, null, deferPlacement);
+      int bx = MathHelper.floor_double(player.posX);
+      int by = MathHelper.floor_double(player.posY) - 1;
+      int bz = MathHelper.floor_double(player.posZ);
+      BlockPos pos = new BlockPos(bx, by, bz);
+      Vec3 hit = resolveHitForPlace(pos, targetFacing, null);
+      if (hit != null)
+        executePlacement(player, pos, targetFacing, hit, deferPlacement);
       targetFacing = -1;
     }
   }
 
-  private void queuePlacement(Object player, ScaffoldPlacement.BlockData blockData,
+  private void queuePlacement(EntityPlayerSP player, ScaffoldPlacement.BlockData blockData,
                               boolean towerJump, ScaffoldPlacement.AimData aimData,
                               boolean deferPlacement, boolean prioritizePlacement,
                               boolean allowTellyAirPlacement) {
-    boolean rotationPlacementDelay = rotationSyncActive();
-    // Tower snaps rotation instantly — keep placing every jump tick.
-    if (towerJump)
-      rotationPlacementDelay = false;
-
+    // OpenMyau: place when rotationTick <= 0 (not the stricter rotationSyncActive).
     if (blockData == null || !canPlaceThisTick(player, towerJump, allowTellyAirPlacement)
-        || (rotationPlacementDelay && !towerJump)
+        || (rotationTick > 0 && !towerJump)
         || !isHoldingPlaceable(player))
       return;
 
-    Object hit = resolvePlacementHit(player, blockData, towerJump, aimData);
+    Vec3 hit = resolvePlacementHit(blockData, aimData);
     if (hit == null)
       return;
     executePlacement(player, blockData.blockPos, blockData.faceOrdinal, hit, deferPlacement);
   }
 
-  private void executePlacement(Object player, Object blockPos, int faceOrdinal,
-                                Object hit, boolean deferPlacement) {
+  private void executePlacement(EntityPlayerSP player, BlockPos blockPos, int faceOrdinal,
+                                Vec3 hit, boolean deferPlacement) {
     if (deferPlacement) {
       pendingBlockData = new ScaffoldPlacement.BlockData(blockPos, faceOrdinal);
       pendingHit = hit;
+      pendingHitYaw = lastSentYaw;
+      pendingHitPitch = lastSentPitch;
       pendingPlace = true;
       return;
     }
-    place(blockPos, faceOrdinal, hit);
+    tryPlace(player, blockPos, faceOrdinal, hit);
   }
 
   private void clearPendingPlacement() {
     pendingBlockData = null;
     pendingHit = null;
+    pendingHitYaw = Float.MIN_VALUE;
     pendingPlace = false;
   }
 
-  /** Kept for PlayerUpdateHook compatibility after the previous implementation. */
+  /** Kept for PlayerUpdateHook compatibility. */
   public static void onPreUpdate(Object player) {
     gnu.client.module.Module module = gnu.client.module.ModuleManager.instance().getModule("Scaffold");
     if (module instanceof ScaffoldModule && module.isEnabled())
-      ((ScaffoldModule) module).preUpdate(player);
+      ((ScaffoldModule) module).preUpdate();
   }
 
-  private void preUpdate(Object player) {
-    if (player == null)
-      return;
+  private void preUpdate() {
     runScaffoldCycle(true);
   }
 
@@ -387,17 +404,18 @@ public final class ScaffoldModule extends Module implements PacketListener {
   public static void onBeforeWalkingPlace(Object player) {
     gnu.client.module.Module module = gnu.client.module.ModuleManager.instance().getModule("Scaffold");
     if (module instanceof ScaffoldModule && module.isEnabled())
-      ((ScaffoldModule) module).beforeWalkingPlace(player);
+      ((ScaffoldModule) module).beforeWalkingPlace();
   }
 
-  private void beforeWalkingPlace(Object player) {
+  private void beforeWalkingPlace() {
+    EntityPlayerSP player = mc.thePlayer;
     if (player == null)
       return;
     flushPendingServerSlot(player);
     if (pendingPlace && pendingBlockData != null) {
       int faceOrdinal = pendingBlockData.faceOrdinal;
-      Object blockPos = pendingBlockData.blockPos;
-      Object hit = pendingHit;
+      BlockPos blockPos = pendingBlockData.blockPos;
+      Vec3 hit = pendingHit;
       clearPendingPlacement();
       if (isHoldingPlaceable(player))
         tryPlace(player, blockPos, faceOrdinal, hit);
@@ -411,10 +429,10 @@ public final class ScaffoldModule extends Module implements PacketListener {
           player, cycleWorld, startY, stage, shouldKeepY);
       if (blockData == null)
         break;
-      Object hit = resolvePlacementHit(player, blockData, false, null);
+      Vec3 hit = resolvePlacementHit(blockData, null);
       if (hit == null)
         break;
-      tryPlace(player, blockData.blockPos, blockData.faceOrdinal);
+      tryPlace(player, blockData.blockPos, blockData.faceOrdinal, hit);
     }
   }
 
@@ -422,11 +440,11 @@ public final class ScaffoldModule extends Module implements PacketListener {
     return multiPlace.getValue() ? 3 : 1;
   }
 
-  private void updateKeepY(Object player) {
-    if (McAccess.isOnGround()) {
+  private void updateKeepY(EntityPlayerSP player) {
+    if (player.onGround) {
       boolean keepYAllowed = keepY.getValue() != KEEPY_NONE
-          && (!keepYOnPress.getValue() || McAccess.isUseItemKeyDown())
-          && !McAccess.isJumpKeyHeld();
+          && (!keepYOnPress.getValue() || isUseItemKeyDown())
+          && !mc.gameSettings.keyBindJump.isKeyDown();
       boolean preserveTellyKeepY = telly.getValue() && isTellyMoving() && keepYAllowed && stage > 0;
 
       if (stage > 0 && !preserveTellyKeepY)
@@ -439,13 +457,13 @@ public final class ScaffoldModule extends Module implements PacketListener {
         stage = 1;
 
       if (!shouldKeepY && !preserveTellyKeepY)
-        startY = floor(McAccess.entityPosY(player));
+        startY = MathHelper.floor_double(player.posY);
       shouldKeepY = false;
       towering = false;
     }
   }
 
-  private void updateTelly(Object player) {
+  private void updateTelly(EntityPlayerSP player) {
     if (!telly.getValue()) {
       forceJump = false;
       tellyTicksUntilJump = 0;
@@ -454,7 +472,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
       return;
     }
 
-    boolean onGround = McAccess.isOnGround();
+    boolean onGround = player.onGround;
     if (onGround) {
       tellyWasOnGround = true;
       tellyAirTicks = 0;
@@ -473,11 +491,8 @@ public final class ScaffoldModule extends Module implements PacketListener {
     }
 
     if (onGround && tellyTicksUntilJump >= tellyJumpTicks()) {
-      // Always jump when delay is met — even while awaiting placement. Movement input runs
-      // before deferred placement, so blocking jump here adds a full ground tick of lag.
       forceJump = true;
       tellyTicksUntilJump = 0;
-      // Fresh straight + sprint window every jump; stale awaiting skips straight on later jumps.
       tellyStraightJumpActive = true;
       tellyAwaitingPlacement = false;
     } else if (onGround) {
@@ -486,51 +501,48 @@ public final class ScaffoldModule extends Module implements PacketListener {
   }
 
   /**
-   * LiquidBounce {@code ScaffoldTellyFeature.doNotAim}: forward look once jump delay is met
-   * ({@code ticksUntilJump >= jumpTicks}), then keep it through {@code telly-straight} air ticks
-   * ({@code airTicks <= straight}) after a telly jump.
+   * LiquidBounce {@code ScaffoldTellyFeature.doNotAim}: forward look once jump delay is met,
+   * then keep it through {@code telly-straight} air ticks after a telly jump.
    */
-  private boolean isTellyDoNotAim(Object player) {
+  private boolean isTellyDoNotAim(EntityPlayerSP player) {
     if (!telly.getValue() || !isTellyMoving() || !hasTellyBlocks(player) || isTowering(player))
       return false;
     if (!tellyStraightJumpActive)
       return false;
-    if (McAccess.isOnGround()) {
-      // Landing tick after straight: block-aim for placement, not forward look.
+    if (player.onGround) {
       if (tellyAwaitingPlacement)
         return false;
       return tellyTicksUntilJump >= tellyJumpTicks();
     }
-    // Air straight is tick-count only — never let stale awaiting skip the window on later jumps.
     return tellyAirTicks <= tellyStraightTicks();
   }
 
-  private void prepareTellyRotation(Object player) {
+  private void prepareTellyRotation(EntityPlayerSP player) {
     if (tellyResetMode.getValue() == TELLY_REVERSE) {
-      yaw = ScaffoldPlacement.quantize(Math.round(McAccess.getYaw() / 45.0f) * 45.0f);
-      pitch = ScaffoldPlacement.quantize(Math.max(45.0f, McAccess.getPitch()));
+      yaw = ScaffoldPlacement.quantize(Math.round(player.rotationYaw / 45.0f) * 45.0f);
+      pitch = ScaffoldPlacement.quantize(Math.max(45.0f, player.rotationPitch));
       canRotate = true;
     } else {
-      // RESET: movement-forward yaw (not frozen camera look)
       yaw = ScaffoldPlacement.quantize(currentMoveYaw(player));
       pitch = ScaffoldPlacement.quantize(0.0f);
       canRotate = true;
     }
   }
 
-  private void updateBlockSlot(Object player) {
+  private void updateBlockSlot(EntityPlayerSP player) {
     if (player == null)
-      return;
-    Object inv = McAccess.getObject(player, "field_71071_by");
-    if (inv == null)
       return;
 
     int searchSlot = blockSlot >= 0 && blockSlot <= 8
         ? blockSlot
-        : McAccess.getHotbarSlot(player);
-    Object stack = stackInHotbarSlot(inv, searchSlot);
-    int count = isPlaceableStack(stack) ? McAccess.getStackSize(stack) : 0;
-    blockCount = Math.min(blockCount, count);
+        : player.inventory.currentItem;
+    ItemStack stack = player.inventory.getStackInSlot(searchSlot);
+    int count = isPlaceableStack(stack) ? stack.stackSize : 0;
+    // -1 means "uninitialized" (OpenMyau); don't Math.min it into a permanent -1.
+    if (blockCount < 0)
+      blockCount = count;
+    else
+      blockCount = Math.min(blockCount, count);
     if (blockCount > 0) {
       selectBlockSlot(player, searchSlot);
       return;
@@ -541,10 +553,10 @@ public final class ScaffoldModule extends Module implements PacketListener {
       slot--;
     for (int i = slot; i > slot - 9; i--) {
       int hotbarSlot = (i % 9 + 9) % 9;
-      Object candidate = McAccess.getStackInSlot(inv, hotbarSlot);
+      ItemStack candidate = player.inventory.getStackInSlot(hotbarSlot);
       if (!isPlaceableStack(candidate))
         continue;
-      blockCount = McAccess.getStackSize(candidate);
+      blockCount = candidate.stackSize;
       selectBlockSlot(player, hotbarSlot);
       return;
     }
@@ -553,12 +565,12 @@ public final class ScaffoldModule extends Module implements PacketListener {
   }
 
   /** OpenMyau parity: client/server hotbar uses the block stack; item-spoof is render-only. */
-  private void selectBlockSlot(Object player, int hotbarSlot) {
+  private void selectBlockSlot(EntityPlayerSP player, int hotbarSlot) {
     if (hotbarSlot < 0 || hotbarSlot > 8)
       return;
     blockSlot = hotbarSlot;
-    if (hotbarSlot != McAccess.getHotbarSlot(player)) {
-      McAccess.setHotbarSlot(player, hotbarSlot);
+    if (hotbarSlot != player.inventory.currentItem) {
+      player.inventory.currentItem = hotbarSlot;
       if (shouldSyncServerSlot(hotbarSlot))
         pendingServerSlot = hotbarSlot;
     }
@@ -567,22 +579,18 @@ public final class ScaffoldModule extends Module implements PacketListener {
   /**
    * Revert accidental hotbar scroll/number-key switches while scaffold owns a block slot.
    */
-  private void guardClientHotbarSlot(Object player) {
+  private void guardClientHotbarSlot(EntityPlayerSP player) {
     if (player == null || blockSlot < 0 || blockSlot > 8 || blockCount <= 0)
       return;
     if (ScaffoldItemSpoofHook.isRenderSpoofActive())
       return;
-    if (McAccess.getHotbarSlot(player) == blockSlot)
+    if (player.inventory.currentItem == blockSlot)
       return;
-    McAccess.setHotbarSlot(player, blockSlot);
+    player.inventory.currentItem = blockSlot;
     if (shouldSyncServerSlot(blockSlot))
       pendingServerSlot = blockSlot;
   }
 
-  /**
-   * Skip redundant C09 when item-spoof already has the block stack in the selected slot,
-   * or when the server was already told about this slot.
-   */
   private boolean shouldSyncServerSlot(int slot) {
     if (slot < 0 || slot > 8 || slot == serverReportedSlot)
       return false;
@@ -591,14 +599,8 @@ public final class ScaffoldModule extends Module implements PacketListener {
     return true;
   }
 
-  private Object stackInHotbarSlot(Object inv, int slot) {
-    if (inv == null || slot < 0 || slot > 8)
-      return null;
-    return McAccess.getStackInSlot(inv, slot);
-  }
-
   /** Send C09 right before C08 so the server uses the same block slot as the client. */
-  private void flushPendingServerSlot(Object player) {
+  private void flushPendingServerSlot(EntityPlayerSP player) {
     if (player == null) {
       pendingServerSlot = -1;
       return;
@@ -611,39 +613,35 @@ public final class ScaffoldModule extends Module implements PacketListener {
     }
     int syncSlot = blockSlot >= 0 && blockSlot <= 8
         ? blockSlot
-        : McAccess.getHotbarSlot(player);
+        : player.inventory.currentItem;
     if (shouldSyncServerSlot(syncSlot))
       notifyServerSlot(syncSlot);
   }
 
-  private Object getPlacementStack(Object player) {
+  private ItemStack getPlacementStack(EntityPlayerSP player) {
     if (player == null)
       return null;
     if (blockSlot >= 0 && blockSlot <= 8) {
-      Object inv = McAccess.getObject(player, "field_71071_by");
-      Object stack = stackInHotbarSlot(inv, blockSlot);
+      ItemStack stack = player.inventory.getStackInSlot(blockSlot);
       if (isPlaceableStack(stack))
         return stack;
     }
-    return McAccess.getHeldItemStack(player);
+    return player.getHeldItem();
   }
 
-  private void ensureClientBlockSlot(Object player) {
+  private void ensureClientBlockSlot(EntityPlayerSP player) {
     if (player == null || blockSlot < 0 || blockSlot > 8)
       return;
-    if (McAccess.getHotbarSlot(player) != blockSlot)
-      McAccess.setHotbarSlot(player, blockSlot);
+    if (player.inventory.currentItem != blockSlot)
+      player.inventory.currentItem = blockSlot;
   }
 
-  /**
-   * OpenMyau item-spoof: render hooks show {@link #lastSlot}; placement uses the block slot.
-   */
   private void notifyServerSlot(int slot) {
     if (!shouldSyncServerSlot(slot))
       return;
     sendingServerSlot = true;
     try {
-      McAccess.sendHeldItemChange(slot);
+      PacketUtils.sendPacketNoEvent(new C09PacketHeldItemChange(slot));
     } finally {
       sendingServerSlot = false;
     }
@@ -659,7 +657,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
     return itemSpoof.getValue();
   }
 
-  private void prepareBaseRotation(Object player) {
+  private void prepareBaseRotation(EntityPlayerSP player) {
     float currentYaw = currentMoveYaw(player);
     float reportedYaw = PlayerUpdateHook.lastReportedYaw(player);
     float yawDiffTo180 = wrapTo(currentYaw - 180.0f, reportedYaw);
@@ -698,29 +696,49 @@ public final class ScaffoldModule extends Module implements PacketListener {
         canRotate = true;
         break;
       default:
-        yaw = McAccess.getYaw();
-        pitch = McAccess.getPitch();
+        yaw = player.rotationYaw;
+        pitch = player.rotationPitch;
         canRotate = false;
         break;
     }
   }
 
-  private float yawBaseForAim(Object player) {
+  private float yawBaseForAim(EntityPlayerSP player) {
     float reportedYaw = PlayerUpdateHook.lastReportedYaw(player);
     return yaw == -180.0f && pitch == 0.0f ? reportedYaw : wrapTo(yaw, reportedYaw);
   }
 
-  private ScaffoldPlacement.AimData resolveBlockAim(Object player,
+  private ScaffoldPlacement.AimData resolveBlockAim(EntityPlayerSP player,
                                                     ScaffoldPlacement.BlockData blockData,
                                                     float basePitch) {
     if (player == null || blockData == null)
       return null;
-    float reportedYaw = PlayerUpdateHook.lastReportedYaw(player);
-    float moveYaw = currentMoveYaw(player);
+    // OpenMyau uses one yaw base. Try sequentially and stop on first hit —
+    // scanning all four bases × 256 reflected raycasts freezes the client.
     float presetYaw = yawBaseForAim(player);
-    float cameraYaw = McAccess.getYaw();
-    float[] bases = new float[] {presetYaw, moveYaw, reportedYaw, cameraYaw};
-    return ScaffoldPlacement.findAimData(blockData, player, bases, basePitch);
+    ScaffoldPlacement.AimData hit = ScaffoldPlacement.findAimData(blockData, presetYaw, basePitch);
+    if (hit != null)
+      return hit;
+    float moveYaw = currentMoveYaw(player);
+    if (Math.abs(ScaffoldPlacement.wrapAngle(moveYaw - presetYaw)) > 0.5f) {
+      hit = ScaffoldPlacement.findAimData(blockData, moveYaw, basePitch);
+      if (hit != null)
+        return hit;
+    }
+    float reportedYaw = PlayerUpdateHook.lastReportedYaw(player);
+    if (Math.abs(ScaffoldPlacement.wrapAngle(reportedYaw - presetYaw)) > 0.5f
+        && Math.abs(ScaffoldPlacement.wrapAngle(reportedYaw - moveYaw)) > 0.5f) {
+      hit = ScaffoldPlacement.findAimData(blockData, reportedYaw, basePitch);
+      if (hit != null)
+        return hit;
+    }
+    float cameraYaw = player.rotationYaw;
+    if (Math.abs(ScaffoldPlacement.wrapAngle(cameraYaw - presetYaw)) > 0.5f
+        && Math.abs(ScaffoldPlacement.wrapAngle(cameraYaw - moveYaw)) > 0.5f
+        && Math.abs(ScaffoldPlacement.wrapAngle(cameraYaw - reportedYaw)) > 0.5f) {
+      return ScaffoldPlacement.findAimData(blockData, cameraYaw, basePitch);
+    }
+    return null;
   }
 
   private void clearRotationState() {
@@ -733,13 +751,13 @@ public final class ScaffoldModule extends Module implements PacketListener {
     steppedServerPitch = Float.NaN;
   }
 
-  private float rotationBaseYaw(Object player) {
+  private float rotationBaseYaw(EntityPlayerSP player) {
     if (!Float.isNaN(steppedServerYaw))
       return steppedServerYaw;
     return PlayerUpdateHook.lastReportedYaw(player);
   }
 
-  private float rotationBasePitch(Object player) {
+  private float rotationBasePitch(EntityPlayerSP player) {
     if (!Float.isNaN(steppedServerPitch))
       return steppedServerPitch;
     return PlayerUpdateHook.lastReportedPitch(player);
@@ -747,10 +765,9 @@ public final class ScaffoldModule extends Module implements PacketListener {
 
   /**
    * OpenMyau Scaffold 424–431: snap backwards/sideways preset yaw into {@code this.yaw}
-   * when block aim is within 90° of the movement-facing preset (rotation snap, not a
-   * separate movefix yaw driver).
+   * when block aim is within 90° of the movement-facing preset.
    */
-  private void snapMovementFacingYaw(Object player) {
+  private void snapMovementFacingYaw(EntityPlayerSP player) {
     if (player == null || !MoveFixUtil.isForwardPressed() || !canRotate)
       return;
     if (isTowerJumpActive(player))
@@ -763,7 +780,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
       return;
 
     float currentYaw = currentMoveYaw(player);
-    float cameraYaw = McAccess.getYaw();
+    float cameraYaw = player.rotationYaw;
     float yawDiffTo180 = wrapTo(currentYaw - 180.0f, cameraYaw);
     if (Math.abs(ScaffoldPlacement.wrapAngle(yawDiffTo180 - yaw)) >= 90.0f)
       return;
@@ -778,7 +795,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
       yaw = ScaffoldPlacement.quantize(diagonalYaw);
   }
 
-  private void applyRotation(Object player) {
+  private void applyRotation(EntityPlayerSP player) {
     if (rotationMode.getValue() == ROT_NONE) {
       resetSteppedRotation();
       RotationState.applyState(false, 0.0f, 0.0f, 0.0f, -1);
@@ -786,7 +803,6 @@ public final class ScaffoldModule extends Module implements PacketListener {
       return;
     }
 
-    // Telly straight / reverse: smoothly rotate toward forward look — never break straight for emergency aim.
     if (tellyDoNotAimActive && telly.getValue()) {
       sendTellyTransitionRotation(player, yaw, pitch);
       return;
@@ -800,7 +816,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
     applyNormalRotation(player);
   }
 
-  private void applyNormalRotation(Object player) {
+  private void applyNormalRotation(EntityPlayerSP player) {
     float baseYaw = rotationBaseYaw(player);
     float basePitch = rotationBasePitch(player);
     float targetYaw = yaw;
@@ -817,8 +833,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
     updateTellyRotTransition(targetYaw, targetPitch);
   }
 
-  /** Downward silent rotation while jump-towering (LiquidBounce aimOnTower / OpenMyau isTowering). */
-  private void applyTowerRotation(Object player) {
+  private void applyTowerRotation(EntityPlayerSP player) {
     float targetYaw = canRotate ? yaw : ScaffoldPlacement.quantize(currentMoveYaw(player));
     float targetPitch = canRotate ? pitch : 85.0f;
     if (targetPitch < 75.0f)
@@ -826,7 +841,6 @@ public final class ScaffoldModule extends Module implements PacketListener {
     targetYaw = ScaffoldPlacement.quantize(targetYaw);
     targetPitch = ScaffoldPlacement.quantize(targetPitch);
 
-    // Tower always snaps — slow pitch stepping breaks jump placement.
     sendSilentRotation(targetYaw, targetPitch, targetYaw, targetPitch);
     towering = true;
   }
@@ -835,8 +849,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
     return telly.getValue() && tellyDoNotAimActive;
   }
 
-  /** Smooth rotation between backwards block aim and telly straight forward look. */
-  private void sendTellyTransitionRotation(Object player, float targetYaw, float targetPitch) {
+  private void sendTellyTransitionRotation(EntityPlayerSP player, float targetYaw, float targetPitch) {
     sendTargetRotation(rotationBaseYaw(player), rotationBasePitch(player), targetYaw, targetPitch);
     updateTellyRotTransition(targetYaw, targetPitch);
   }
@@ -852,8 +865,6 @@ public final class ScaffoldModule extends Module implements PacketListener {
 
   private void sendTargetRotation(float baseYaw, float basePitch,
                                   float targetYaw, float targetPitch) {
-    // OpenMyau: targetYaw already includes snapMovementFacingYaw into this.yaw;
-    // one setRotation + setPervRotation path — no separate aligned/stable movefix yaw.
     if (shouldSmoothRotation()) {
       sendSilentRotation(
           smoothYaw(baseYaw, targetYaw),
@@ -865,13 +876,6 @@ public final class ScaffoldModule extends Module implements PacketListener {
     }
   }
 
-  private void sendSilentRotation(float sentYaw, float sentPitch) {
-    sendSilentRotation(sentYaw, sentPitch, sentYaw, sentPitch);
-  }
-
-  /**
-   * OpenMyau setRotation + setPervRotation(targetYaw, 3) when move-fix is SILENT.
-   */
   private void sendSilentRotation(float sentYaw, float sentPitch, float targetYaw, float targetPitch) {
     PlayerUpdateHook.requestRotation(sentYaw, sentPitch);
     if (prevSentYaw != Float.MIN_VALUE) {
@@ -889,17 +893,15 @@ public final class ScaffoldModule extends Module implements PacketListener {
     lastSentPitch = sentPitch;
     steppedServerYaw = sentYaw;
     steppedServerPitch = sentPitch;
+    // Always feed RotationState for F5/FreeLook. MoveFix priority only when SILENT
+    // MoveFix is on (MoveFixHook requires priority 1/3 for moveFlying).
+    // pervYaw MUST match sentYaw while stepping — targetYaw here causes Simulation
+    // (moveFlying at full snap while C03 is still mid-step).
     boolean moveFixEnabled = moveFix.getValue() == MOVEFIX_SILENT;
-    if (moveFixEnabled) {
-      RotationState.applyState(
-          true,
-          sentYaw,
-          sentPitch,
-          sentYaw,
-          (int) ROTATION_PRIORITY);
-    } else if (RotationState.getPriority() == (int) ROTATION_PRIORITY) {
-      RotationState.reset();
-    }
+    float pervYaw = moveFixEnabled ? sentYaw : mc.thePlayer.rotationYaw;
+    // MoveFix on → priority 3; render-only → -3 (KA uses -1) so clears do not cross-wipe.
+    int priority = moveFixEnabled ? (int) ROTATION_PRIORITY : -3;
+    RotationState.applyState(true, sentYaw, sentPitch, pervYaw, priority);
     updateRotationDelay(sentYaw, sentPitch, targetYaw, targetPitch);
   }
 
@@ -911,38 +913,37 @@ public final class ScaffoldModule extends Module implements PacketListener {
       rotationTick = Math.max(rotationTick, 1);
   }
 
-  private Object resolvePlacementHit(Object player, ScaffoldPlacement.BlockData blockData,
-                                     boolean towerJump, ScaffoldPlacement.AimData aimData) {
-    if (blockData == null || player == null)
+  /**
+   * Grim RotationPlace: hit must lie on the ray from the <b>sent</b> C03 look.
+   * Aim/face-center hitVec is only a fallback when the look already intersects
+   * the support (same block); never place on a miss.
+   */
+  private Vec3 resolvePlacementHit(ScaffoldPlacement.BlockData blockData,
+                                   ScaffoldPlacement.AimData aimData) {
+    if (blockData == null || lastSentYaw == Float.MIN_VALUE)
       return null;
-    Object hit = validatedPlacementHit(player, blockData.blockPos, blockData.faceOrdinal);
-    if (hit != null)
-      return hit;
-    if (!rotationSyncActive() && aimData != null && aimData.hitVec != null)
-      return aimData.hitVec;
+    Vec3 lookHit = ScaffoldPlacement.findPlacementHit(
+        mc.thePlayer, blockData, lastSentYaw, lastSentPitch);
+    if (lookHit != null)
+      return lookHit;
+    // Look misses support — do not place (RotationPlace). Aim hitVec alone is unsafe
+    // while rotation-speed < 180 or after movement-facing snap changes yaw.
     return null;
   }
 
-  /** Raycast at the rotation sent in C03 — Grim RotationPlace checks this vector. */
-  private Object validatedPlacementHit(Object player, Object blockPos, int faceOrdinal) {
-    if (player == null || blockPos == null)
+  private Vec3 resolveHitForPlace(BlockPos blockPos, int faceOrdinal,
+                                  ScaffoldPlacement.AimData aimData) {
+    if (blockPos == null || lastSentYaw == Float.MIN_VALUE)
       return null;
-    float yaw;
-    float pitch;
-    if (rotationMode.getValue() == ROT_NONE) {
-      yaw = McAccess.getYaw();
-      pitch = McAccess.getPitch();
-    } else {
-      if (lastSentYaw == Float.MIN_VALUE)
-        return null;
-      yaw = lastSentYaw;
-      pitch = lastSentPitch;
-    }
-    ScaffoldPlacement.BlockData data = new ScaffoldPlacement.BlockData(blockPos, faceOrdinal);
-    return ScaffoldPlacement.findPlacementHit(player, data, yaw, pitch);
+    return ScaffoldPlacement.findPlacementHit(
+        mc.thePlayer,
+        new ScaffoldPlacement.BlockData(blockPos, faceOrdinal),
+        lastSentYaw,
+        lastSentPitch);
   }
 
-  private boolean canPlaceThisTick(Object player, boolean towerJump, boolean allowTellyAirPlacement) {
+  private boolean canPlaceThisTick(EntityPlayerSP player, boolean towerJump,
+                                   boolean allowTellyAirPlacement) {
     if (towerJump)
       return true;
     if (allowTellyAirPlacement)
@@ -952,58 +953,51 @@ public final class ScaffoldModule extends Module implements PacketListener {
     return !isTellyDoNotAim(player);
   }
 
-  private void place(Object blockPos, int faceOrdinal, Object hitVec) {
-    Object player = McAccess.thePlayer();
-    if (player != null)
-      tryPlace(player, blockPos, faceOrdinal, hitVec);
-  }
-
-  private boolean tryPlace(Object player, Object blockPos, int faceOrdinal) {
-    return tryPlace(player, blockPos, faceOrdinal, null);
-  }
-
-  private boolean tryPlace(Object player, Object blockPos, int faceOrdinal, Object preferredHit) {
+  private boolean tryPlace(EntityPlayerSP player, BlockPos blockPos, int faceOrdinal, Vec3 preferredHit) {
     if (blockPos == null || player == null)
       return false;
     if (shouldBlockDuplicateRotPlace())
       return false;
     flushPendingServerSlot(player);
-    Object stack = getPlacementStack(player);
-    if (!isPlaceableStack(stack) || McAccess.getStackSize(stack) < 1)
+    ItemStack stack = getPlacementStack(player);
+    if (!isPlaceableStack(stack) || stack.stackSize < 1)
       return false;
     if (placementsThisTick >= maxPlacementsPerTick())
       return false;
-    Object world = McAccess.theWorld();
+    WorldClient world = mc.theWorld;
     if (world == null)
       return false;
-    if (!ScaffoldPlacement.isValidSupport(world, blockPos))
+    if (!ScaffoldPlacement.isValidSupport(blockPos))
       return false;
-    if (!ScaffoldPlacement.isPlacementTargetClear(world, blockPos, faceOrdinal))
+    if (!ScaffoldPlacement.isPlacementTargetClear(blockPos, faceOrdinal))
       return false;
-    Object hitVec = validatedPlacementHit(player, blockPos, faceOrdinal);
-    if (hitVec == null && !rotationSyncActive()) {
-      if (preferredHit != null)
-        hitVec = preferredHit;
-    }
-    if (hitVec == null)
+
+    // Grim RotationPlace: never invent a hitVec the sent look did not produce.
+    if (preferredHit == null)
       return false;
-    Object facing = ScaffoldPlacement.enumFacing(faceOrdinal);
+    Vec3 hitVec = preferredHit;
+
+    EnumFacing facing = ScaffoldPlacement.enumFacing(faceOrdinal);
     if (facing == null)
       return false;
-    McAccess.clearRightClickDelay();
+
+    ((IAccessorMinecraft) mc).setRightClickDelayTimer(0);
     ensureClientBlockSlot(player);
-    boolean placed = McAccess.onPlayerRightClick(player, world, stack, blockPos, facing, hitVec);
-    if (!placed)
-      placed = McAccess.sendBlockPlacementPacket(stack, blockPos, facing, hitVec);
+
+    boolean placed = false;
+    if (mc.playerController != null) {
+      placed = mc.playerController.onPlayerRightClick(
+          player, world, stack, blockPos, facing, hitVec);
+    }
     if (placed && swing.getValue())
-      McAccess.swingItem();
+      player.swingItem();
     if (placed) {
       placementsThisTick++;
       lastPlaceRotDeltaYaw = tickRotDeltaYaw;
       lastPlaceRotDeltaPitch = tickRotDeltaPitch;
       blockCount--;
-      Object held = getPlacementStack(player);
-      int heldCount = isPlaceableStack(held) ? McAccess.getStackSize(held) : 0;
+      ItemStack held = getPlacementStack(player);
+      int heldCount = isPlaceableStack(held) ? held.stackSize : 0;
       blockCount = Math.min(blockCount, heldCount);
       if (telly.getValue())
         tellyAwaitingPlacement = false;
@@ -1012,34 +1006,36 @@ public final class ScaffoldModule extends Module implements PacketListener {
     return false;
   }
 
-  private void applySafeWalk(Object player, Object world) {
-    boolean enable = safeWalk.getValue() && McAccess.isOnGround()
-        && McAccess.getMotionY() <= 0.0 && nearEdge(player, world);
-    boolean sneak = enable || McAccess.isSneakKeyHeld();
+  private void applySafeWalk(EntityPlayerSP player, World world) {
+    boolean enable = safeWalk.getValue() && player.onGround
+        && player.motionY <= 0.0 && nearEdge(player, world);
+    boolean sneak = enable || mc.gameSettings.keyBindSneak.isKeyDown();
     forceSneak = enable;
-    McAccess.setSneaking(player, sneak);
+    player.setSneaking(sneak);
   }
 
-  private boolean nearEdge(Object player, Object world) {
-    Object aabb = McAccess.getEntityBoundingBox(player);
-    if (aabb == null || world == null)
+  private boolean nearEdge(EntityPlayerSP player, World world) {
+    if (player == null || world == null)
       return false;
-    int by = floor(McAccess.aabbMinY(aabb) - 0.01);
-    int minX = floor(McAccess.aabbMinX(aabb) + McAccess.getMotionX());
-    int maxX = floor(McAccess.aabbMaxX(aabb) + McAccess.getMotionX());
-    int minZ = floor(McAccess.aabbMinZ(aabb) + McAccess.getMotionZ());
-    int maxZ = floor(McAccess.aabbMaxZ(aabb) + McAccess.getMotionZ());
+    AxisAlignedBB aabb = player.getEntityBoundingBox();
+    if (aabb == null)
+      return false;
+    int by = MathHelper.floor_double(aabb.minY - 0.01);
+    int minX = MathHelper.floor_double(aabb.minX + player.motionX);
+    int maxX = MathHelper.floor_double(aabb.maxX + player.motionX);
+    int minZ = MathHelper.floor_double(aabb.minZ + player.motionZ);
+    int maxZ = MathHelper.floor_double(aabb.maxZ + player.motionZ);
     for (int x = minX; x <= maxX; x++) {
       for (int z = minZ; z <= maxZ; z++) {
-        if (!McAccess.isReplaceable(world, x, by, z))
+        if (!ScaffoldPlacement.isReplaceable(new BlockPos(x, by, z)))
           return false;
       }
     }
-    return McAccess.isMovementKeyHeld();
+    return isMovementKeyHeld();
   }
 
-  private void applyTower(Object player, Object world) {
-    boolean onGround = McAccess.isOnGround();
+  private void applyTower(EntityPlayerSP player, World world) {
+    boolean onGround = player.onGround;
 
     if (!isTowerJumpActive(player)) {
       resetTowerState();
@@ -1047,7 +1043,6 @@ public final class ScaffoldModule extends Module implements PacketListener {
       return;
     }
 
-    // LiquidBounce: per-tick support check — skip motion this tick, not the whole tower session.
     if (!hasTowerSupport(player, world)) {
       towerJumpOffY = Double.NaN;
       towerWasOnGround = onGround;
@@ -1084,14 +1079,14 @@ public final class ScaffoldModule extends Module implements PacketListener {
     }
   }
 
-  private void onTowerJump(Object player) {
-    towerJumpOffY = McAccess.entityPosY(player);
+  private void onTowerJump(EntityPlayerSP player) {
+    towerJumpOffY = player.posY;
     int mode = tower.getValue();
     if (mode == TOWER_PULLDOWN)
       towerPulldownPending = true;
     if (mode == TOWER_KARHU) {
       towerKarhuTimerActive = true;
-      McAccess.setTimerSpeed(towerKarhuTimer.getValue());
+      setTimerSpeed(towerKarhuTimer.getValue());
       if (towerKarhuPulldown.getValue())
         towerPulldownPending = true;
     }
@@ -1099,7 +1094,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
 
   private void resetTowerState() {
     if (towerKarhuTimerActive)
-      McAccess.resetTimer();
+      setTimerSpeed(1.0f);
     towerJumpOffY = Double.NaN;
     towerAirTicks = 0;
     towerKarhuTimerActive = false;
@@ -1107,116 +1102,110 @@ public final class ScaffoldModule extends Module implements PacketListener {
     wasTowerJump = false;
   }
 
-  /** LiquidBounce ScaffoldTowerMotion */
-  private void applyTowerMotion(Object player) {
+  private void applyTowerMotion(EntityPlayerSP player) {
     if (Double.isNaN(towerJumpOffY))
       return;
-    double y = McAccess.entityPosY(player);
+    double y = player.posY;
     if (y <= towerJumpOffY + towerTriggerHeight.getValue())
       return;
 
     double truncated = Math.floor(y);
-    McAccess.setEntityPosition(player, McAccess.entityPosX(player), truncated, McAccess.entityPosZ(player));
+    player.setPosition(player.posX, truncated, player.posZ);
 
     float slow = towerSlow.getValue();
-    McAccess.setMotion(
-        McAccess.getMotionX() * slow,
-        towerMotion.getValue(),
-        McAccess.getMotionZ() * slow);
+    player.motionX *= slow;
+    player.motionY = towerMotion.getValue();
+    player.motionZ *= slow;
     towerJumpOffY = truncated;
   }
 
-  /** LiquidBounce ScaffoldTowerPulldown */
-  private void applyTowerPulldown(Object player, Object world) {
-    if (!towerPulldownPending || McAccess.isOnGround())
+  private void applyTowerPulldown(EntityPlayerSP player, World world) {
+    if (!towerPulldownPending || player.onGround)
       return;
-    if (McAccess.getMotionY() >= towerPulldownTrigger.getValue())
-      return;
-    if (!hasTowerSupport(player, world)) {
-      towerPulldownPending = false;
-      return;
-    }
-    McAccess.setMotion(McAccess.getMotionX(), -1.0, McAccess.getMotionZ());
-    towerPulldownPending = false;
-  }
-
-  /** LiquidBounce ScaffoldTowerKarhu */
-  private void applyTowerKarhu(Object player, Object world) {
-    if (!towerKarhuPulldown.getValue() || !towerPulldownPending || McAccess.isOnGround())
-      return;
-    if (McAccess.getMotionY() >= towerKarhuTrigger.getValue())
+    if (player.motionY >= towerPulldownTrigger.getValue())
       return;
     if (!hasTowerSupport(player, world)) {
       towerPulldownPending = false;
       return;
     }
-    McAccess.setMotion(McAccess.getMotionX(), McAccess.getMotionY() - 1.0, McAccess.getMotionZ());
+    player.motionY = -1.0;
     towerPulldownPending = false;
   }
 
-  /** LiquidBounce ScaffoldTowerVulcan */
-  private void applyTowerVulcan(Object player) {
-    Object tickEntity = player;
-    int tick = tickEntity == null ? 0 : McAccess.getInt(tickEntity, "field_70173_aa");
-    boolean moving = McAccess.isMovementKeyHeld();
+  private void applyTowerKarhu(EntityPlayerSP player, World world) {
+    if (!towerKarhuPulldown.getValue() || !towerPulldownPending || player.onGround)
+      return;
+    if (player.motionY >= towerKarhuTrigger.getValue())
+      return;
+    if (!hasTowerSupport(player, world)) {
+      towerPulldownPending = false;
+      return;
+    }
+    player.motionY -= 1.0;
+    towerPulldownPending = false;
+  }
+
+  private void applyTowerVulcan(EntityPlayerSP player) {
+    int tick = player.ticksExisted;
+    boolean moving = isMovementKeyHeld();
     if (tick % 2 == 0) {
-      McAccess.setMotion(McAccess.getMotionX(), 0.7, McAccess.getMotionZ());
+      player.motionY = 0.7;
     } else {
-      McAccess.setMotion(McAccess.getMotionX(), moving ? 0.42 : 0.6, McAccess.getMotionZ());
+      player.motionY = moving ? 0.42 : 0.6;
     }
   }
 
-  /** LiquidBounce ScaffoldTowerHypixel */
-  private void applyTowerHypixel(Object player) {
-    if (!McAccess.isMovementKeyHeld()) {
-      double px = McAccess.entityPosX(player);
+  private void applyTowerHypixel(EntityPlayerSP player) {
+    if (!isMovementKeyHeld()) {
+      double px = player.posX;
       if (px % 1.0 != 0.0) {
         double snap = Math.round(px) - px;
         if (snap > 0.281)
           snap = 0.281;
-        McAccess.setMotion(snap, McAccess.getMotionY(), McAccess.getMotionZ());
+        player.motionX = snap;
       }
     }
 
     if (towerAirTicks > 14) {
-      McAccess.setMotion(McAccess.getMotionX() * 0.6, McAccess.getMotionY() - 0.09, McAccess.getMotionZ() * 0.6);
+      player.motionX *= 0.6;
+      player.motionY -= 0.09;
+      player.motionZ *= 0.6;
       return;
     }
 
     switch (towerAirTicks % 3) {
       case 0: {
         double speed = 0.247 - ThreadLocalRandom.current().nextFloat() / 100.0;
-        double yawRad = Math.toRadians(McAccess.getYaw());
-        McAccess.setMotion(-Math.sin(yawRad) * speed, 0.42, Math.cos(yawRad) * speed);
+        double yawRad = Math.toRadians(player.rotationYaw);
+        player.motionX = -Math.sin(yawRad) * speed;
+        player.motionY = 0.42;
+        player.motionZ = Math.cos(yawRad) * speed;
         break;
       }
       case 2:
-        McAccess.setMotion(
-            McAccess.getMotionX(),
-            1.0 - (McAccess.entityPosY(player) % 1.0),
-            McAccess.getMotionZ());
+        player.motionY = 1.0 - (player.posY % 1.0);
         break;
       default:
         break;
     }
   }
 
-  private boolean hasTowerSupport(Object player, Object world) {
+  private boolean hasTowerSupport(EntityPlayerSP player, World world) {
     if (player == null || world == null)
       return false;
-    Object aabb = McAccess.getEntityBoundingBox(player);
+    AxisAlignedBB aabb = player.getEntityBoundingBox();
     if (aabb == null)
-      return isBlockBelow(player, world);
-    int minX = floor(McAccess.aabbMinX(aabb) - 0.5);
-    int maxX = floor(McAccess.aabbMaxX(aabb) + 0.5);
-    int minZ = floor(McAccess.aabbMinZ(aabb) - 0.5);
-    int maxZ = floor(McAccess.aabbMaxZ(aabb) + 0.5);
-    int minY = floor(McAccess.aabbMinY(aabb) - 1.05);
-    int maxY = floor(McAccess.aabbMinY(aabb) - 0.01);
+      return isBlockBelow(player);
+    int minX = MathHelper.floor_double(aabb.minX - 0.5);
+    int maxX = MathHelper.floor_double(aabb.maxX + 0.5);
+    int minZ = MathHelper.floor_double(aabb.minZ - 0.5);
+    int maxZ = MathHelper.floor_double(aabb.maxZ + 0.5);
+    int minY = MathHelper.floor_double(aabb.minY - 1.05);
+    int maxY = MathHelper.floor_double(aabb.minY - 0.01);
     for (int x = minX; x <= maxX; x++) {
       for (int z = minZ; z <= maxZ; z++) {
         for (int y = minY; y <= maxY; y++) {
-          if (!McAccess.isReplaceable(world, x, y, z))
+          if (!ScaffoldPlacement.isReplaceable(new BlockPos(x, y, z)))
             return true;
         }
       }
@@ -1224,24 +1213,21 @@ public final class ScaffoldModule extends Module implements PacketListener {
     return false;
   }
 
-  private boolean isBlockBelow(Object player, Object world) {
-    if (player == null || world == null)
+  private boolean isBlockBelow(EntityPlayerSP player) {
+    if (player == null)
       return false;
-    int bx = floor(McAccess.entityPosX(player));
-    int by = floor(McAccess.entityPosY(player)) - 1;
-    int bz = floor(McAccess.entityPosZ(player));
-    return !McAccess.isReplaceable(world, bx, by, bz);
+    int bx = MathHelper.floor_double(player.posX);
+    int by = MathHelper.floor_double(player.posY) - 1;
+    int bz = MathHelper.floor_double(player.posZ);
+    return !ScaffoldPlacement.isReplaceable(new BlockPos(bx, by, bz));
   }
 
-  /**
-   * LiquidBounce {@code isTowering} — jump held + tower mode + blocks; no manual look or RMB.
-   */
-  private boolean isTowerJumpActive(Object player) {
+  private boolean isTowerJumpActive(EntityPlayerSP player) {
     if (player == null || tower.getValue() == TOWER_NONE) {
       wasTowerJump = false;
       return false;
     }
-    if (!McAccess.isJumpKeyHeld()) {
+    if (!mc.gameSettings.keyBindJump.isKeyDown()) {
       wasTowerJump = false;
       return false;
     }
@@ -1254,14 +1240,15 @@ public final class ScaffoldModule extends Module implements PacketListener {
   }
 
   boolean wantsTowerJumpInput() {
-    return wasTowerJump && McAccess.isOnGround();
+    EntityPlayerSP player = mc.thePlayer;
+    return wasTowerJump && player != null && player.onGround;
   }
 
-  private boolean isTowering(Object player) {
+  private boolean isTowering(EntityPlayerSP player) {
     if (!isTowerJumpActive(player))
       return false;
     return keepY.getValue() == KEEPY_TELLY && stage > 0 && !telly.getValue()
-        || McAccess.isJumpKeyHeld();
+        || mc.gameSettings.keyBindJump.isKeyDown();
   }
 
   @Override
@@ -1278,13 +1265,12 @@ public final class ScaffoldModule extends Module implements PacketListener {
     return handleVulcanTower(packet);
   }
 
-  /** Cancel foreign C09 hotbar changes while scaffold controls the block slot. */
   private boolean handleHotbarGuard(Object packet) {
     if (!PacketHelper.isHeldItemChange(packet) || sendingServerSlot)
       return false;
     if (blockSlot < 0 || blockSlot > 8 || blockCount <= 0)
       return false;
-    Object player = McAccess.thePlayer();
+    EntityPlayerSP player = mc.thePlayer;
     if (player == null)
       return false;
     guardClientHotbarSlot(player);
@@ -1294,15 +1280,15 @@ public final class ScaffoldModule extends Module implements PacketListener {
   private boolean handleVulcanTower(Object packet) {
     if (tower.getValue() != TOWER_VULCAN)
       return false;
-    Object player = McAccess.thePlayer();
-    Object world = McAccess.theWorld();
+    EntityPlayerSP player = mc.thePlayer;
+    WorldClient world = mc.theWorld;
     if (player == null || world == null || !isTowerJumpActive(player))
       return false;
     if (!hasTowerSupport(player, world))
       return false;
-    if (McAccess.isMovementKeyHeld() || !PacketHelper.c03HasPosition(packet))
+    if (isMovementKeyHeld() || !PacketHelper.c03HasPosition(packet))
       return false;
-    int tick = McAccess.getInt(player, "field_70173_aa");
+    int tick = player.ticksExisted;
     if (tick % 2 != 0)
       return false;
     double x = PacketHelper.c03PosX(packet);
@@ -1319,26 +1305,28 @@ public final class ScaffoldModule extends Module implements PacketListener {
   }
 
   private float[] applyMotionScale(float forward, float strafe) {
-    float speed = McAccess.isOnGround() ? groundMotion.getValue() / 100.0f : airMotion.getValue() / 100.0f;
+    EntityPlayerSP player = mc.thePlayer;
+    float speed = (player != null && player.onGround)
+        ? groundMotion.getValue() / 100.0f
+        : airMotion.getValue() / 100.0f;
     if (Math.abs(speed - 1.0f) < 0.001f)
       return new float[] {forward, strafe};
     return new float[] {forward * speed, strafe * speed};
   }
 
-  private void applySprint(Object player) {
+  private void applySprint(EntityPlayerSP player) {
     if (shouldEnableTellySprint(player)) {
-      McAccess.setSprintKeyState(true);
-      McAccess.setClientSprinting(player, true);
+      setSprintKeyState(true);
+      player.setSprinting(true);
       return;
     }
     if (shouldSuppressSprint(player)) {
-      McAccess.setSprintKeyState(false);
-      McAccess.setClientSprinting(player, false);
+      setSprintKeyState(false);
+      player.setSprinting(false);
     }
   }
 
-  /** Sprint while telly straight: server looks forward and W moves forward on server. */
-  private boolean shouldEnableTellySprint(Object player) {
+  private boolean shouldEnableTellySprint(EntityPlayerSP player) {
     if (!shouldUseTellySprint() || player == null || !telly.getValue())
       return false;
     if (tellyResetMode.getValue() != TELLY_RESET)
@@ -1349,22 +1337,22 @@ public final class ScaffoldModule extends Module implements PacketListener {
       return false;
     if (forceSneak)
       return false;
-    if (safeWalk.getValue() && McAccess.isOnGround() && cycleWorld != null && nearEdge(player, cycleWorld))
+    if (safeWalk.getValue() && player.onGround && cycleWorld != null && nearEdge(player, cycleWorld))
       return false;
     return isServerForwardMoving();
   }
 
-  /** Snap and place immediately once telly straight window ends (air or landing). */
-  private boolean shouldPrioritizePlacement(Object player, boolean tellyDoNotAim) {
+  private boolean shouldPrioritizePlacement(EntityPlayerSP player, boolean tellyDoNotAim) {
     if (player == null || cycleWorld == null)
       return false;
     if (!telly.getValue() || !tellyStraightJumpActive || tellyDoNotAim)
       return false;
-    return tellyAwaitingPlacement || !McAccess.isOnGround();
+    if (tellyAwaitingPlacement)
+      return true;
+    return player.onGround;
   }
 
-  /** Allow block placement once the straight window ends — including landing ticks. */
-  private boolean shouldAllowTellyAirPlacement(Object player, boolean prioritizePlacement,
+  private boolean shouldAllowTellyAirPlacement(EntityPlayerSP player, boolean prioritizePlacement,
                                                boolean tellyDoNotAim) {
     if (prioritizePlacement)
       return true;
@@ -1385,11 +1373,10 @@ public final class ScaffoldModule extends Module implements PacketListener {
     gnu.client.module.Module module = gnu.client.module.ModuleManager.instance().getModule("Scaffold");
     if (!(module instanceof ScaffoldModule) || !module.isEnabled())
       return false;
-    return ((ScaffoldModule) module).shouldSuppressSprint(McAccess.thePlayer());
+    return ((ScaffoldModule) module).shouldSuppressSprint(mc.thePlayer);
   }
 
-  /** OpenMyau shouldStopSprint: not towering and sprint mode NONE (no Grim look-angle suppress). */
-  private boolean shouldSuppressSprint(Object player) {
+  private boolean shouldSuppressSprint(EntityPlayerSP player) {
     if (isTellyResetSprintWindow(player))
       return false;
     if (isTowering(player))
@@ -1397,7 +1384,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
     return sprintMode.getValue() == SPRINT_NONE;
   }
 
-  private boolean isTellyResetSprintWindow(Object player) {
+  private boolean isTellyResetSprintWindow(EntityPlayerSP player) {
     if (!telly.getValue() || tellyResetMode.getValue() != TELLY_RESET || player == null)
       return false;
     if (!isTellyMoving() || !hasTellyBlocks(player) || isTowering(player))
@@ -1405,25 +1392,27 @@ public final class ScaffoldModule extends Module implements PacketListener {
     return isTellyDoNotAim(player);
   }
 
-  public static void patchMovementInput(Object movInput) {
-    if (movInput == null)
+  public static void patchMovementInput(Object movInputObj) {
+    if (!(movInputObj instanceof MovementInput))
       return;
+    MovementInput movInput = (MovementInput) movInputObj;
     gnu.client.module.Module module = gnu.client.module.ModuleManager.instance().getModule("Scaffold");
     ScaffoldModule scaffold = module instanceof ScaffoldModule && module.isEnabled()
         ? (ScaffoldModule) module : null;
 
-    boolean sneak = McAccess.getBool(movInput, "field_78899_d") || forceSneak;
-    boolean jump = McAccess.getBool(movInput, "field_78901_c") || forceJump || shouldForceImmediateTellyJump();
+    boolean sneak = movInput.sneak || forceSneak;
+    boolean jump = movInput.jump || forceJump || shouldForceImmediateTellyJump();
     if (shouldTowerJumpInput())
       jump = true;
-    float forward = McAccess.getFloat(movInput, "field_78900_b");
-    float strafe = McAccess.getFloat(movInput, "field_78902_a");
+    float forward = movInput.moveForward;
+    float strafe = movInput.moveStrafe;
     if (scaffold != null
         && scaffold.moveFix.getValue() == MOVEFIX_SILENT
         && MoveFixUtil.hasMoveFixPriority((int) ROTATION_PRIORITY)
         && MoveFixUtil.isForwardPressed()) {
-      // OpenMyau onMoveInput: camera keys → server-relative input for silent yaw.
-      float[] fixed = MoveFixUtil.fixStrafe(McAccess.getYaw(), RotationState.getSmoothedYaw(), sneak);
+      EntityPlayerSP player = mc.thePlayer;
+      float cameraYaw = player != null ? player.rotationYaw : 0.0f;
+      float[] fixed = MoveFixUtil.fixStrafe(cameraYaw, RotationState.getSmoothedYaw(), sneak);
       forward = fixed[0];
       strafe = fixed[1];
     }
@@ -1432,10 +1421,10 @@ public final class ScaffoldModule extends Module implements PacketListener {
       forward = scaled[0];
       strafe = scaled[1];
     }
-    McAccess.setBool(movInput, "field_78899_d", sneak);
-    McAccess.setBool(movInput, "field_78901_c", jump);
-    McAccess.setFloat(movInput, "field_78900_b", forward);
-    McAccess.setFloat(movInput, "field_78902_a", strafe);
+    movInput.sneak = sneak;
+    movInput.jump = jump;
+    movInput.moveForward = forward;
+    movInput.moveStrafe = strafe;
   }
 
   private static boolean shouldTowerJumpInput() {
@@ -1449,13 +1438,13 @@ public final class ScaffoldModule extends Module implements PacketListener {
     gnu.client.module.Module module = gnu.client.module.ModuleManager.instance().getModule("Scaffold");
     if (!(module instanceof ScaffoldModule) || !module.isEnabled())
       return false;
-    return ((ScaffoldModule) module).shouldForceImmediateTellyJump(McAccess.thePlayer());
+    return ((ScaffoldModule) module).shouldForceImmediateTellyJump(mc.thePlayer);
   }
 
-  private boolean shouldForceImmediateTellyJump(Object player) {
+  private boolean shouldForceImmediateTellyJump(EntityPlayerSP player) {
     if (!telly.getValue() || tellyJumpTicks() != 0 || player == null)
       return false;
-    if (!McAccess.isOnGround() || !isTellyMoving() || isTowering(player))
+    if (!player.onGround || !isTellyMoving() || isTowering(player))
       return false;
     if (!hasTellyBlocks(player))
       return false;
@@ -1474,48 +1463,61 @@ public final class ScaffoldModule extends Module implements PacketListener {
     return sprint != null && sprint.isEnabled();
   }
 
-  private boolean isHoldingPlaceable(Object player) {
+  private boolean isHoldingPlaceable(EntityPlayerSP player) {
     return isPlaceableStack(getPlacementStack(player));
   }
 
-  private boolean hasTellyBlocks(Object player) {
+  private boolean hasTellyBlocks(EntityPlayerSP player) {
     return blockCount > 0 || isHoldingPlaceable(player);
   }
 
-  private boolean isPlaceableStack(Object stack) {
-    if (stack == null || McAccess.getStackSize(stack) < 1)
-      return false;
-    return McAccess.getBlockFromItemStack(stack) != null;
+  private boolean isPlaceableStack(ItemStack stack) {
+    return stack != null && stack.stackSize >= 1 && stack.getItem() instanceof ItemBlock;
   }
 
-  private float currentMoveYaw(Object player) {
-    return MoveFixUtil.adjustYaw(McAccess.getYaw(), forwardValue(), leftValue());
-  }
-
-  private static float adjustYaw(float yaw, float forward, float strafe) {
-    return MoveFixUtil.adjustYaw(yaw, forward, strafe);
+  private float currentMoveYaw(EntityPlayerSP player) {
+    return MoveFixUtil.adjustYaw(player.rotationYaw, forwardValue(), leftValue());
   }
 
   private int forwardValue() {
     int value = 0;
-    if (McAccess.isForwardKeyHeld())
+    if (mc.gameSettings.keyBindForward.isKeyDown())
       value++;
-    if (McAccess.isBackKeyHeld())
+    if (mc.gameSettings.keyBindBack.isKeyDown())
       value--;
     return value;
   }
 
   private int leftValue() {
     int value = 0;
-    if (McAccess.isLeftKeyHeld())
+    if (mc.gameSettings.keyBindLeft.isKeyDown())
       value++;
-    if (McAccess.isRightKeyHeld())
+    if (mc.gameSettings.keyBindRight.isKeyDown())
       value--;
     return value;
   }
 
   private boolean isTellyMoving() {
     return forwardValue() != 0 || leftValue() != 0;
+  }
+
+  private boolean isMovementKeyHeld() {
+    return mc.gameSettings.keyBindForward.isKeyDown()
+        || mc.gameSettings.keyBindBack.isKeyDown()
+        || mc.gameSettings.keyBindLeft.isKeyDown()
+        || mc.gameSettings.keyBindRight.isKeyDown();
+  }
+
+  private boolean isUseItemKeyDown() {
+    return mc.gameSettings.keyBindUseItem.isKeyDown();
+  }
+
+  private void setSprintKeyState(boolean pressed) {
+    KeyBinding.setKeyBindState(mc.gameSettings.keyBindSprint.getKeyCode(), pressed);
+  }
+
+  private void setTimerSpeed(float speed) {
+    ((IAccessorTimer) ((IAccessorMinecraft) mc).getTimer()).setTimerSpeed(speed);
   }
 
   private int tellyStraightTicks() {
@@ -1539,15 +1541,11 @@ public final class ScaffoldModule extends Module implements PacketListener {
     return yawRemaining > 1.0f || pitchRemaining > 1.0f;
   }
 
-  /** Exposed for movement input — rotation sync only gates placement, not fixStrafe. */
   public boolean isRotationSyncing() {
     return rotationSyncActive();
   }
 
-  /** Grim DuplicateRotPlace — skip placing on identical repeated rotation deltas while stepping. */
   private boolean shouldBlockDuplicateRotPlace() {
-    if (!rotationSyncActive())
-      return false;
     if (tickRotDeltaYaw > 2.0f && lastPlaceRotDeltaYaw > 2.0f
         && Math.abs(tickRotDeltaYaw - lastPlaceRotDeltaYaw) < 0.0001f)
       return true;
@@ -1557,7 +1555,6 @@ public final class ScaffoldModule extends Module implements PacketListener {
     return false;
   }
 
-  /** True while server rotation is still catching up to the tick's rotation target. */
   private boolean rotationSyncActive() {
     if (!shouldSmoothRotation())
       return false;
@@ -1597,10 +1594,5 @@ public final class ScaffoldModule extends Module implements PacketListener {
 
   private static float wrapTo(float angle, float target) {
     return target + ScaffoldPlacement.wrapAngle(angle - target);
-  }
-
-  private static int floor(double v) {
-    int i = (int) v;
-    return v < i ? i - 1 : i;
   }
 }

@@ -1,11 +1,12 @@
 package gnu.client.module.modules.network;
 
+import gnu.client.mixin.impl.accessors.IAccessorGameSettings;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.LagrangeOutboundTrack;
 import gnu.client.runtime.packet.LagrangeOutboundTrack.EnumLagDirection;
 import gnu.client.runtime.packet.LagrangeOutboundTrack.LagRequest;
@@ -15,6 +16,18 @@ import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
 import gnu.client.runtime.packet.PacketUtil;
 import gnu.client.util.RenderHelper;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.multiplayer.WorldClient;
+import net.minecraft.client.settings.GameSettings;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemAxe;
+import net.minecraft.item.ItemPotion;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.ItemSword;
+import net.minecraft.util.MovementInput;
+import net.minecraft.util.MovingObjectPosition;
 
 import java.util.EnumSet;
 
@@ -53,7 +66,7 @@ public final class LagrangeModule extends Module implements PacketListener {
     /** Raven {@code LagRequest} for THIS module's outbound lag. Null when not lagging. */
     private LagRequest outboundLag;
 
-    private Object currentTarget;
+    private EntityPlayer currentTarget;
     private double lastDistSq = -1.0;
     private boolean isLagging;
     private int lastSelfHurtTime;
@@ -165,16 +178,15 @@ public final class LagrangeModule extends Module implements PacketListener {
     // ── Raven LagRange combat logic ─────────────────────────────────────
 
     private void tickCombatLogic() {
-        Object mc = McAccess.getMinecraft();
-        Object player = McAccess.thePlayer(mc);
-        Object world = McAccess.theWorld(mc);
-        if (player == null || world == null || McAccess.getBool(player, "field_70128_L")) {
+        EntityPlayerSP player = Mc.player();
+        WorldClient world = Mc.world();
+        if (player == null || world == null || player.isDead) {
             if (isLagging)
                 flushLag();
             resetState();
             return;
         }
-        if (McAccess.currentScreen(mc) != null) {
+        if (Mc.currentScreen() != null) {
             if (isLagging)
                 flushLag();
             resetState();
@@ -183,13 +195,13 @@ public final class LagrangeModule extends Module implements PacketListener {
 
         double rangeSq = range.getValue() * range.getValue();
         boolean moving = isMoving(player);
-        Object nextTarget = findTarget(player, world, rangeSq);
+        EntityPlayer nextTarget = findTarget(player, world, rangeSq);
         if (!sameTarget(nextTarget)) {
             if (isLagging)
                 flushLag();
             lastDistSq = -1.0;
             hitMarkedEntityId = -1;
-            lastTargetHurtTime = nextTarget != null ? McAccess.getInt(nextTarget, "field_70737_aN") : 0;
+            lastTargetHurtTime = nextTarget != null ? nextTarget.hurtTime : 0;
         }
         currentTarget = nextTarget;
 
@@ -200,27 +212,27 @@ public final class LagrangeModule extends Module implements PacketListener {
                     flushLag();
                     lastDistSq = distSq;
                     hitMarkedEntityId = -1;
-                    lastTargetHurtTime = McAccess.getInt(currentTarget, "field_70737_aN");
+                    lastTargetHurtTime = currentTarget.hurtTime;
                     return;
                 }
                 if (lastDistSq >= 0 && distSq >= lastDistSq) {
-                    boolean hitHold = hitMarkedEntityId == McAccess.entityId(currentTarget)
+                    boolean hitHold = hitMarkedEntityId == currentTarget.getEntityId()
                             && distSq <= MINIMUM_DISTANCE_SQ
-                            && McAccess.getInt(player, "field_70737_aN") == 0;
+                            && player.hurtTime == 0;
                     if (!hitHold) {
                         flushLag();
                         lastDistSq = distSq;
-                        lastTargetHurtTime = McAccess.getInt(currentTarget, "field_70737_aN");
+                        lastTargetHurtTime = currentTarget.hurtTime;
                         return;
                     }
                 }
-                int hurtTime = McAccess.getInt(player, "field_70737_aN");
+                int hurtTime = player.hurtTime;
                 if (hurtTime > lastSelfHurtTime) {
                     flushLag();
                     hitMarkedEntityId = -1;
                     lastSelfHurtTime = hurtTime;
                     lastDistSq = distSq;
-                    lastTargetHurtTime = McAccess.getInt(currentTarget, "field_70737_aN");
+                    lastTargetHurtTime = currentTarget.hurtTime;
                     return;
                 }
                 lastSelfHurtTime = hurtTime;
@@ -234,7 +246,7 @@ public final class LagrangeModule extends Module implements PacketListener {
                 if (holdingWeapon.getValue() && !isHoldingWeapon(player)) {
                     flushLag();
                     lastDistSq = distSq;
-                    lastTargetHurtTime = McAccess.getInt(currentTarget, "field_70737_aN");
+                    lastTargetHurtTime = currentTarget.hurtTime;
                     return;
                 }
                 if (sprintReset.getValue()) {
@@ -243,7 +255,7 @@ public final class LagrangeModule extends Module implements PacketListener {
                         flushLag();
                         lastSprintState = true;
                         lastDistSq = distSq;
-                        lastTargetHurtTime = McAccess.getInt(currentTarget, "field_70737_aN");
+                        lastTargetHurtTime = currentTarget.hurtTime;
                         return;
                     }
                     lastSprintState = sprintingNow;
@@ -254,7 +266,7 @@ public final class LagrangeModule extends Module implements PacketListener {
                         flushLag();
                         lastBlockingState = true;
                         lastDistSq = distSq;
-                        lastTargetHurtTime = McAccess.getInt(currentTarget, "field_70737_aN");
+                        lastTargetHurtTime = currentTarget.hurtTime;
                         return;
                     }
                     lastBlockingState = blockingNow;
@@ -262,29 +274,29 @@ public final class LagrangeModule extends Module implements PacketListener {
                 if (usedSplashPotion.getValue() && isUsingSplashPotion(player)) {
                     flushLag();
                     lastDistSq = distSq;
-                    lastTargetHurtTime = McAccess.getInt(currentTarget, "field_70737_aN");
+                    lastTargetHurtTime = currentTarget.hurtTime;
                     return;
                 }
                 lastDistSq = distSq;
-                lastTargetHurtTime = McAccess.getInt(currentTarget, "field_70737_aN");
+                lastTargetHurtTime = currentTarget.hurtTime;
                 return;
             }
 
-            int hurtTime = McAccess.getInt(player, "field_70737_aN");
+            int hurtTime = player.hurtTime;
             if (hurtTime > lastSelfHurtTime)
                 hitMarkedEntityId = -1;
             lastSelfHurtTime = hurtTime;
             lastSprintState = isSprinting(player);
             lastBlockingState = isBlocking(player);
-            int targetHurtTime = McAccess.getInt(currentTarget, "field_70737_aN");
+            int targetHurtTime = currentTarget.hurtTime;
             if (hurtTime == 0 && lastTargetHurtTime == 0 && targetHurtTime > 0)
-                hitMarkedEntityId = McAccess.entityId(currentTarget);
+                hitMarkedEntityId = currentTarget.getEntityId();
             lastTargetHurtTime = targetHurtTime;
 
             boolean closing = lastDistSq >= 0 && distSq < lastDistSq;
             boolean outsideMinDist = distSq > MINIMUM_DISTANCE_SQ;
             boolean weaponOk = !holdingWeapon.getValue() || isHoldingWeapon(player);
-            boolean hitMarkedHere = hitMarkedEntityId == McAccess.entityId(currentTarget);
+            boolean hitMarkedHere = hitMarkedEntityId == currentTarget.getEntityId();
             boolean hitStart = hitMarkedHere && distSq <= MINIMUM_DISTANCE_SQ && hurtTime == 0 && moving && weaponOk;
             lastDistSq = distSq;
             if (hurtTime == 0 && weaponOk && moving && ((closing && outsideMinDist) || hitStart))
@@ -336,10 +348,9 @@ public final class LagrangeModule extends Module implements PacketListener {
 
     @Override
     public void onRender(float partialTicks) {
-        if (!realPositionIndicator.getValue() || !isLagging || !serverPosValid || !McAccess.isInGame())
+        if (!realPositionIndicator.getValue() || !isLagging || !serverPosValid || !Mc.isInGame())
             return;
-        Object mc = McAccess.getMinecraft();
-        if (isFirstPersonView(mc) && !showInFirstPerson.getValue())
+        if (isFirstPersonView() && !showInFirstPerson.getValue())
             return;
 
         long nowMs = System.currentTimeMillis();
@@ -368,7 +379,7 @@ public final class LagrangeModule extends Module implements PacketListener {
         double drawY = lerp(indicatorFromY, indicatorToY, t);
         double drawZ = lerp(indicatorFromZ, indicatorToZ, t);
 
-        double[] vp = McAccess.getViewerPos(mc, partialTicks);
+        double[] vp = Mc.getViewerPos(partialTicks);
         float fr = espRed.getValue() / 255.0f;
         float fg = espGreen.getValue() / 255.0f;
         float fb = espBlue.getValue() / 255.0f;
@@ -498,22 +509,22 @@ public final class LagrangeModule extends Module implements PacketListener {
     }
 
     private void syncServerPosFromPlayer() {
-        Object player = McAccess.thePlayer(McAccess.getMinecraft());
+        EntityPlayerSP player = Mc.player();
         if (player == null)
             return;
-        serverPosX = McAccess.getDouble(player, "field_70165_t");
-        serverPosY = McAccess.getDouble(player, "field_70163_u");
-        serverPosZ = McAccess.getDouble(player, "field_70161_v");
+        serverPosX = player.posX;
+        serverPosY = player.posY;
+        serverPosZ = player.posZ;
         serverPosValid = true;
     }
 
     // ── Indicator helpers ───────────────────────────────────────────────
 
-    private static boolean isFirstPersonView(Object mc) {
-        Object settings = McAccess.getObject(mc, "field_71474_y");
+    private static boolean isFirstPersonView() {
+        GameSettings settings = Mc.settings();
         if (settings == null)
             return true;
-        return McAccess.getInt(settings, "field_74320_O") == 0;
+        return ((IAccessorGameSettings) settings).getThirdPersonView() == 0;
     }
 
     private void clearIndicatorInterp() {
@@ -533,26 +544,26 @@ public final class LagrangeModule extends Module implements PacketListener {
 
     // ── Target helpers ──────────────────────────────────────────────────
 
-    private Object findTarget(Object player, Object world, double maxRangeSq) {
-        Object mop = McAccess.objectMouseOver();
+    private EntityPlayer findTarget(EntityPlayerSP player, WorldClient world, double maxRangeSq) {
+        MovingObjectPosition mop = Mc.objectMouseOver();
         if (mop != null) {
-            Object entityHit = McAccess.getObject(mop, "field_72308_g");
-            if (entityHit != null && entityHit != player && isPlayerEntity(entityHit)) {
-                double distSq = distanceSqFromEyeToClosestOnAabb(player, entityHit);
-                if (distSq <= maxRangeSq && McAccess.getInt(entityHit, "field_70725_aQ") <= 0)
-                    return entityHit;
+            Entity entityHit = mop.entityHit;
+            if (entityHit instanceof EntityPlayer && entityHit != player) {
+                EntityPlayer candidate = (EntityPlayer) entityHit;
+                double distSq = distanceSqFromEyeToClosestOnAabb(player, candidate);
+                if (distSq <= maxRangeSq && candidate.deathTime <= 0)
+                    return candidate;
             }
         }
 
-        Object entitiesObj = McAccess.getObject(world, "field_73010_i");
-        if (!(entitiesObj instanceof Iterable))
+        if (world.playerEntities == null)
             return null;
-        Object best = null;
+        EntityPlayer best = null;
         double bestDistSq = Double.MAX_VALUE;
-        for (Object entity : (Iterable<?>) entitiesObj) {
-            if (entity == null || entity == player || !isPlayerEntity(entity))
+        for (EntityPlayer entity : world.playerEntities) {
+            if (entity == null || entity == player)
                 continue;
-            if (McAccess.getInt(entity, "field_70725_aQ") > 0)
+            if (entity.deathTime > 0)
                 continue;
             double distSq = distanceSqFromEyeToClosestOnAabb(player, entity);
             if (distSq > maxRangeSq || distSq >= bestDistSq)
@@ -563,22 +574,22 @@ public final class LagrangeModule extends Module implements PacketListener {
         return best;
     }
 
-    private boolean sameTarget(Object nextTarget) {
+    private boolean sameTarget(EntityPlayer nextTarget) {
         if (currentTarget == null || nextTarget == null)
             return currentTarget == nextTarget;
-        return McAccess.entityId(currentTarget) == McAccess.entityId(nextTarget);
+        return currentTarget.getEntityId() == nextTarget.getEntityId();
     }
 
-    private static double distanceSqFromEyeToClosestOnAabb(Object player, Object entity) {
-        double px = McAccess.getDouble(player, "field_70165_t");
-        double py = McAccess.getDouble(player, "field_70163_u") + McAccess.getFloat(player, "field_70131_O") * 0.85;
-        double pz = McAccess.getDouble(player, "field_70161_v");
+    private static double distanceSqFromEyeToClosestOnAabb(EntityPlayer player, EntityPlayer entity) {
+        double px = player.posX;
+        double py = player.posY + player.height * 0.85;
+        double pz = player.posZ;
 
-        double ex = McAccess.getDouble(entity, "field_70165_t");
-        double ey = McAccess.getDouble(entity, "field_70163_u");
-        double ez = McAccess.getDouble(entity, "field_70161_v");
-        double halfW = McAccess.getFloat(entity, "field_70130_N") * 0.5;
-        double h = McAccess.getFloat(entity, "field_70131_O");
+        double ex = entity.posX;
+        double ey = entity.posY;
+        double ez = entity.posZ;
+        double halfW = entity.width * 0.5;
+        double h = entity.height;
 
         double cx = clamp(px, ex - halfW, ex + halfW);
         double cy = clamp(py, ey, ey + h);
@@ -593,71 +604,34 @@ public final class LagrangeModule extends Module implements PacketListener {
         return Math.max(min, Math.min(max, v));
     }
 
-    private static boolean isPlayerEntity(Object entity) {
-        if (entity == null) return false;
-        Class<?> c = entity.getClass();
-        while (c != null) {
-            if (c.getName().contains("EntityPlayer")) return true;
-            c = c.getSuperclass();
-        }
-        return false;
-    }
-
-    private boolean isMoving(Object player) {
-        Object movementInput = McAccess.getObject(player, "field_71158_b");
+    private boolean isMoving(EntityPlayerSP player) {
+        MovementInput movementInput = player.movementInput;
         if (movementInput == null) return false;
-        float forward = McAccess.getFloat(movementInput, "field_78902_a");
-        float strafe = McAccess.getFloat(movementInput, "field_78900_b");
-        return forward != 0.0f || strafe != 0.0f;
+        return movementInput.moveStrafe != 0.0f || movementInput.moveForward != 0.0f;
     }
 
-    private static boolean isSprinting(Object player) {
-        Object sprinting = McAccess.invoke(player, "func_70051_ag", new Class<?>[0]);
-        if (sprinting instanceof Boolean) return (Boolean) sprinting;
-        sprinting = McAccess.invoke(player, "func_70051_af", new Class<?>[0]);
-        if (sprinting instanceof Boolean) return (Boolean) sprinting;
-        return false;
+    private static boolean isSprinting(EntityPlayer player) {
+        return player.isSprinting();
     }
 
-    private boolean isBlocking(Object player) {
-        Object result = McAccess.invoke(player, "func_70632_aY", new Class<?>[0]);
-        if (result == null)
-            result = McAccess.invokeNamed(player, "isBlocking", new Class<?>[0]);
-        return result instanceof Boolean && (Boolean) result;
+    private boolean isBlocking(EntityPlayer player) {
+        return player.isBlocking();
     }
 
-    private boolean isHoldingWeapon(Object player) {
-        Object stack = McAccess.invoke(player, "func_70694_bm", new Class<?>[0]);
-        if (stack == null)
-            stack = McAccess.invokeNamed(player, "getHeldItem", new Class<?>[0]);
+    private boolean isHoldingWeapon(EntityPlayer player) {
+        ItemStack stack = player.getHeldItem();
         if (stack == null) return false;
-        Object item = McAccess.invoke(stack, "func_77973_b", new Class<?>[0]);
-        if (item == null)
-            item = McAccess.invokeNamed(stack, "getItem", new Class<?>[0]);
-        if (item == null) return false;
-        String name = item.getClass().getName();
-        return name.contains("ItemSword") || name.contains("ItemAxe");
+        Item item = stack.getItem();
+        return item instanceof ItemSword || item instanceof ItemAxe;
     }
 
-    private boolean isUsingSplashPotion(Object player) {
-        Object using = McAccess.invokeNamed(player, "isUsingItem", new Class<?>[0]);
-        if (!(using instanceof Boolean) || !((Boolean) using)) return false;
-        Object stack = McAccess.invoke(player, "func_70694_bm", new Class<?>[0]);
-        if (stack == null)
-            stack = McAccess.invokeNamed(player, "getHeldItem", new Class<?>[0]);
+    private boolean isUsingSplashPotion(EntityPlayer player) {
+        if (!player.isUsingItem()) return false;
+        ItemStack stack = player.getHeldItem();
         if (stack == null) return false;
-        Object item = McAccess.invoke(stack, "func_77973_b", new Class<?>[0]);
-        if (item == null)
-            item = McAccess.invokeNamed(stack, "getItem", new Class<?>[0]);
-        if (item == null || !item.getClass().getName().contains("ItemPotion")) return false;
-        Object meta = McAccess.invoke(stack, "func_77960_j", new Class<?>[0]);
-        if (!(meta instanceof Integer))
-            meta = McAccess.invokeNamed(stack, "getMetadata", new Class<?>[0]);
-        int m = meta instanceof Integer ? (Integer) meta : 0;
-        Object splash = McAccess.invokeStatic(item.getClass(), "func_77831_g", new Class<?>[] { int.class }, m);
-        if (!(splash instanceof Boolean))
-            splash = McAccess.invokeStatic(item.getClass(), "isSplash", new Class<?>[] { int.class }, m);
-        return splash instanceof Boolean && (Boolean) splash;
+        Item item = stack.getItem();
+        if (!(item instanceof ItemPotion)) return false;
+        return ItemPotion.isSplash(stack.getMetadata());
     }
 
     private static void disableConflictingOutboundLag(String otherModuleName) {

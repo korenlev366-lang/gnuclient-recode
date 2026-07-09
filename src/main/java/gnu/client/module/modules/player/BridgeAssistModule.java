@@ -4,38 +4,31 @@ import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
+import gnu.client.utility.RotationUtils;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.multiplayer.PlayerControllerMP;
+import net.minecraft.client.multiplayer.WorldClient;
+import net.minecraft.item.ItemBlock;
+import net.minecraft.item.ItemStack;
+import net.minecraft.util.AxisAlignedBB;
+import net.minecraft.util.BlockPos;
+import net.minecraft.util.EnumFacing;
+import net.minecraft.util.MathHelper;
+import net.minecraft.util.MovementInput;
+import net.minecraft.util.MovingObjectPosition;
+import net.minecraft.world.World;
 
-import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Bridge Assist — auto-sneaks at block edges while bridging and optionally
  * aims at valid block placements (pre-place rotation). Ported from raven-bS
  * {@code BridgeAssist}.
- *
- * Replaces Eagle with a more feature-rich bridging helper:
- *  + Conditional activation (sneak key required, holding blocks, looking down)
- *  + Sneak-on-jump mechanic (brief forced sneak when jumping with forward input)
- *  + Pre-place rotation (pitches down to target valid block faces)
- *  + Unsneak delay with probabilistic tick counts (50-300ms jitter)
- *
- * Actuation hooks {@code MovementInputFromOptions.updatePlayerMoveState()} via
- * {@link gnu.client.mixin.impl.client.MixinMovementInputFromOptions} and
- * {@code MovementInputHook}: {@link #patchMovementInput} runs at each RETURN to
- * apply {@link #forceSneak} / {@link #suppressSneak} and fix the 0.3x
- * moveForward/moveStrafe scaling. {@code EntityPlayerSP.setSneaking} is driven
- * separately for server sneak sync.
- *
- * SRG (1.8.9): onGround=field_70122_E, pitch=field_70125_A (Entity);
- * getEntityBoundingBox=func_174813_aQ; AABB min/max =
- * field_72340_a/field_72336_d/field_72338_b/field_72337_e/field_72339_c/field_72334_f;
- * World.isAirBlock=func_175623_d(BlockPos); keyBindSneak=field_74311_E,
- * KeyBinding.isKeyDown=func_151470_d; sneak=field_78899_d; moveForward=field_78902_a;
- * moveStrafe=field_78900_b (MovementInput, 1.8.9 SRG);
- * keyBindJump=field_74314_A; rotationYaw=field_70177_z; rotationPitch=field_70125_A.
  */
 public final class BridgeAssistModule extends Module implements PacketListener {
 
@@ -43,11 +36,6 @@ public final class BridgeAssistModule extends Module implements PacketListener {
     public static volatile boolean forceSneak = false;
     /** When true, vanilla shift sneak is cleared before forceSneak is applied. */
     public static volatile boolean suppressSneak = false;
-
-    private static volatile boolean movementFieldsResolved = false;
-    private static Field cachedSneakField;
-    private static Field cachedMoveForwardField;
-    private static Field cachedMoveStrafeField;
 
     // ── Settings ─────────────────────────────────────────────────────────
     private final SliderSetting edgeOffset = addSetting(
@@ -96,7 +84,7 @@ public final class BridgeAssistModule extends Module implements PacketListener {
         sneakingFromModule = false;
         forceSneak = false;
         suppressSneak = false;
-        McAccess.setSneaking(McAccess.thePlayer(), false);
+        Mc.setSneaking(Mc.player(), false);
     }
 
     // ── Tick logic ───────────────────────────────────────────────────────
@@ -112,8 +100,8 @@ public final class BridgeAssistModule extends Module implements PacketListener {
         tickCounter++;
         int currentTick = tickCounter;
 
-        Object player = McAccess.thePlayer();
-        Object world = McAccess.theWorld();
+        EntityPlayerSP player = Mc.player();
+        WorldClient world = Mc.world();
         if (player == null || world == null) {
             forceSneak = false;
             suppressSneak = false;
@@ -121,14 +109,14 @@ public final class BridgeAssistModule extends Module implements PacketListener {
             return;
         }
 
-        if (McAccess.currentScreen(McAccess.getMinecraft()) != null) {
+        if (Mc.currentScreen() != null) {
             forceSneak = false;
             suppressSneak = false;
             sneakingFromModule = false;
             return;
         }
 
-        if (!McAccess.getBool(player, "field_70122_E")) { // onGround
+        if (!player.onGround) {
             clearSneakState();
             return;
         }
@@ -137,37 +125,34 @@ public final class BridgeAssistModule extends Module implements PacketListener {
         boolean manualSneak = isManualSneak();
         if (sneakKeyRequired.getValue()) {
             if (!manualSneak) {
-                // Sneak key not pressed -> module does nothing
                 clearSneakState();
                 return;
             }
-            // When sneak key IS held but player isn't moving, suppress module sneak
-            // so the player's own shift works normally.
-            if (!isMoving()) {
+            if (!isMoving(player)) {
                 suppressSneak = true;
                 forceSneak = false;
                 sneakingFromModule = false;
-                McAccess.setSneaking(player, true);
+                Mc.setSneaking(player, true);
                 return;
             }
             suppressSneak = false;
         }
 
         // ── Condition: not moving forward ───────────────────────────────
-        if (notMovingForwardOnly.getValue() && isMovingForward()) {
+        if (notMovingForwardOnly.getValue() && isMovingForward(player)) {
             clearSneakState();
             return;
         }
 
         // ── Condition: looking down (pitch >= 70) ───────────────────────
-        float pitch = McAccess.getFloat(player, "field_70125_A");
+        float pitch = player.rotationPitch;
         if (lookingDownOnly.getValue() && pitch < 70.0f) {
             clearSneakState();
             return;
         }
 
         // ── Condition: holding blocks ───────────────────────────────────
-        if (holdingBlocksOnly.getValue() && !isHoldingBlock()) {
+        if (holdingBlocksOnly.getValue() && !isHoldingBlock(player)) {
             clearSneakState();
             return;
         }
@@ -177,13 +162,8 @@ public final class BridgeAssistModule extends Module implements PacketListener {
         boolean nearEdge = computeNearEdge(predictedAABB, world);
         double offset = computeEdgeDistance(predictedAABB, world);
 
-        // ── NaN guard (Raven parity: predicted AABB has no ground) ─────
-        // When offset is NaN, the predicted AABB shifted past the block edge
-        // (no ground blocks under the shifted box). Raven uses the real
-        // player's onGround state to decide: force sneak if grounded,
-        // release if airborne and we were sneaking.
         if (Double.isNaN(offset)) {
-            if (McAccess.getBool(player, "field_70122_E")) { // real player onGround
+            if (player.onGround) {
                 pressSneak(player, true);
             } else if (sneakingFromModule) {
                 releaseSneak(player, true);
@@ -195,7 +175,6 @@ public final class BridgeAssistModule extends Module implements PacketListener {
         boolean jumpHeld = isJumpHeld();
         if (sneakOnJumpMs.getValue() > 0.0f && jumpHeld && (nearEdge || offset > edgeOffset.getValue())) {
             if (!sneakingFromModule || forceRelease) {
-                // Start jump sneak timer
                 sneakJumpStartTick = currentTick;
                 double raw = sneakOnJumpMs.getValue() / 50.0;
                 int base = (int) raw;
@@ -217,26 +196,22 @@ public final class BridgeAssistModule extends Module implements PacketListener {
                     unsneakDelayTicks = base + (Math.random() < (raw - base) ? 1 : 0);
                 }
 
-                // Still in jump sneak window -> keep sneaking
                 if (sneakJumpStartTick != -1
                         && currentTick - sneakJumpStartTick < sneakJumpDelayTicks) {
                     pressSneak(player, false);
                     return;
                 }
 
-                // Still in unsneak delay window -> keep sneaking
                 if (unsneakStartTick != -1
                         && currentTick - unsneakStartTick < unsneakDelayTicks) {
                     pressSneak(player, false);
                     return;
                 }
 
-                // Unsneak: release
                 releaseSneak(player, true);
                 return;
             }
 
-            // Still near edge -> reset delay timers and keep sneaking
             unsneakStartTick = -1;
             sneakJumpStartTick = -1;
             pressSneak(player, true);
@@ -250,28 +225,22 @@ public final class BridgeAssistModule extends Module implements PacketListener {
 
         // ── Pre-place rotation ──────────────────────────────────────────
         if (prePlaceRotation.getValue() && sneakingFromModule
-                && isHoldingBlock() && pitch >= 60.0f) {
+                && isHoldingBlock(player) && pitch >= 60.0f) {
             applyPrePlaceRotation(player, world);
         }
     }
 
     // ── Rotation (pre-place aiming) ──────────────────────────────────────
 
-    /**
-     * Attempt to find a valid block face to aim at for placement, then
-     * smoothly pitch down toward it. Ported from raven-bS
-     * {@code BridgeAssist.onClientRotation}.
-     */
-    private void applyPrePlaceRotation(Object player, Object world) {
+    private void applyPrePlaceRotation(EntityPlayerSP player, World world) {
         double reach = getBlockReachDistance();
-        float currentPitch = McAccess.getFloat(player, "field_70125_A");
-        float currentYaw = McAccess.getFloat(player, "field_70177_z");
+        float currentPitch = player.rotationPitch;
+        float currentYaw = player.rotationYaw;
 
-        // Build candidate face targets from the player's standing block footprint
-        java.util.List<FaceTarget> targets = findFaceTargets(player, world);
-        if (targets.isEmpty()) return;
+        List<FaceTarget> targets = findFaceTargets(player, world);
+        if (targets.isEmpty())
+            return;
 
-        // Scan pitches 60-90 with slight randomization, find best matching face
         float bestPitch = Float.NaN;
         float bestDelta = Float.MAX_VALUE;
         float randScale = 0.2f;
@@ -283,20 +252,23 @@ public final class BridgeAssistModule extends Module implements PacketListener {
             scanPitch += step;
             float samplePitch = Math.min(scanPitch, 90f);
 
-            Object hitResult = rayCast(reach, currentYaw, samplePitch);
-            if (hitResult == null) continue;
+            MovingObjectPosition hitResult = RotationUtils.rayTraceCustom(reach, currentYaw, samplePitch);
+            if (hitResult == null || hitResult.typeOfHit != MovingObjectPosition.MovingObjectType.BLOCK)
+                continue;
 
-            // Get sideHit and blockPos from the hit result
-            int sideOrdinal = getSideHit(hitResult);
-            if (sideOrdinal < 0) continue;
-            // Skip UP and DOWN faces -- only horizontal placement
-            if (sideOrdinal == 0 || sideOrdinal == 1) continue;
+            EnumFacing sideHit = hitResult.sideHit;
+            if (sideHit == null)
+                continue;
+            int sideOrdinal = sideHit.ordinal();
+            if (sideOrdinal == 0 || sideOrdinal == 1)
+                continue;
 
-            Object hitBlockPos = getHitBlockPos(hitResult);
-            if (hitBlockPos == null) continue;
+            BlockPos hitBlockPos = hitResult.getBlockPos();
+            if (hitBlockPos == null)
+                continue;
 
             for (FaceTarget ft : targets) {
-                if (blockPosEquals(hitBlockPos, ft.block) && sideOrdinal == ft.face) {
+                if (hitBlockPos.equals(ft.block) && sideOrdinal == ft.face) {
                     float delta = Math.abs(samplePitch - currentPitch);
                     if (delta < bestDelta) {
                         bestDelta = delta;
@@ -308,11 +280,11 @@ public final class BridgeAssistModule extends Module implements PacketListener {
             if (scanPitch >= 90f) break;
         }
 
-        if (Float.isNaN(bestPitch)) return;
+        if (Float.isNaN(bestPitch))
+            return;
 
-        // Smooth rotation toward target pitch (keep yaw unchanged)
         float smoothedPitch = smoothRotation(currentPitch, bestPitch, 15f, 20f);
-        McAccess.setFloat(player, "field_70125_A", smoothedPitch);
+        player.rotationPitch = smoothedPitch;
     }
 
     // ── PacketListener ──────────────────────────────────────────────────
@@ -320,7 +292,6 @@ public final class BridgeAssistModule extends Module implements PacketListener {
     @Override
     public boolean onSend(Object packet) {
         if (packet != null && PacketHelper.isBlockPlacement(packet)) {
-            // C08 block placement detected while sneaking from module
             if (sneakingFromModule && sneakKeyRequired.getValue()) {
                 placed = true;
             }
@@ -335,101 +306,53 @@ public final class BridgeAssistModule extends Module implements PacketListener {
 
     // ── Static patchMovementInput (called from MovementInputHook) ───────
 
-    /**
-     * Called from {@code MovementInputHook.afterUpdatePlayerMoveState} at every
-     * RETURN of {@code updatePlayerMoveState}. Vanilla applies 0.3x move scaling
-     * before RETURN; this reconciles sneak state and movement fields when
-     * BridgeAssist overrides sneak after vanilla ran.
-     */
     public static void patchMovementInput(Object movInput) {
-        if (movInput == null)
+        if (!(movInput instanceof MovementInput))
             return;
-        try {
-            ensureMovementFields(movInput.getClass());
-            if (cachedSneakField == null || cachedMoveForwardField == null || cachedMoveStrafeField == null)
-                return;
 
-            boolean vanillaSneak = cachedSneakField.getBoolean(movInput);
-            float moveForward = cachedMoveForwardField.getFloat(movInput);
-            float moveStrafe = cachedMoveStrafeField.getFloat(movInput);
+        MovementInput input = (MovementInput) movInput;
+        boolean vanillaSneak = input.sneak;
+        float moveForward = input.moveForward;
+        float moveStrafe = input.moveStrafe;
 
-            boolean finalSneak = vanillaSneak;
-            if (suppressSneak)
-                finalSneak = false;
-            if (forceSneak)
-                finalSneak = true;
+        boolean finalSneak = vanillaSneak;
+        if (suppressSneak)
+            finalSneak = false;
+        if (forceSneak)
+            finalSneak = true;
 
-            if (!vanillaSneak && finalSneak) {
-                moveForward *= 0.3F;
-                moveStrafe *= 0.3F;
-            } else if (vanillaSneak && !finalSneak) {
-                if (moveForward != 0f)
-                    moveForward /= 0.3F;
-                if (moveStrafe != 0f)
-                    moveStrafe /= 0.3F;
-            }
-
-            cachedSneakField.setBoolean(movInput, finalSneak);
-            cachedMoveForwardField.setFloat(movInput, moveForward);
-            cachedMoveStrafeField.setFloat(movInput, moveStrafe);
-            // Velocity / WTap are invoked from MovementInputHook (Forge) so JumpReset
-            // still runs if this field cache fails.
-        } catch (Exception ignored) {
+        if (!vanillaSneak && finalSneak) {
+            moveForward *= 0.3F;
+            moveStrafe *= 0.3F;
+        } else if (vanillaSneak && !finalSneak) {
+            if (moveForward != 0f)
+                moveForward /= 0.3F;
+            if (moveStrafe != 0f)
+                moveStrafe /= 0.3F;
         }
-    }
 
-    private static void ensureMovementFields(Class<?> cls) {
-        if (movementFieldsResolved)
-            return;
-        synchronized (BridgeAssistModule.class) {
-            if (movementFieldsResolved)
-                return;
-            cachedSneakField = findField(cls, "sneak", "field_78899_d");
-            cachedMoveForwardField = findField(cls, "moveForward", "field_78902_a");
-            cachedMoveStrafeField = findField(cls, "moveStrafe", "field_78900_b");
-            movementFieldsResolved = true;
-        }
-    }
-
-    private static Field findField(Class<?> start, String... names) {
-        for (String name : names) {
-            for (Class<?> cls = start; cls != null; cls = cls.getSuperclass()) {
-                try {
-                    Field f = cls.getDeclaredField(name);
-                    f.setAccessible(true);
-                    return f;
-                } catch (NoSuchFieldException ignored) {
-                }
-            }
-        }
-        return null;
+        input.sneak = finalSneak;
+        input.moveForward = moveForward;
+        input.moveStrafe = moveStrafe;
     }
 
     // ── Sneak control ────────────────────────────────────────────────────
 
-    private void pressSneak(Object player, boolean resetDelay) {
+    private void pressSneak(EntityPlayerSP player, boolean resetDelay) {
         forceSneak = true;
         sneakingFromModule = true;
         if (resetDelay) {
             unsneakStartTick = -1;
             sneakJumpStartTick = -1;
         }
-        McAccess.setSneaking(player, true);
+        Mc.setSneaking(player, true);
     }
 
-    private void releaseSneak(Object player, boolean resetDelay) {
+    private void releaseSneak(EntityPlayerSP player, boolean resetDelay) {
+        EntityPlayerSP local = Mc.player();
         if (sneakKeyRequired.getValue() && sneakingFromModule
-                && isManualSneak() && (placed || !McAccess.getBool(McAccess.thePlayer(), "field_70122_E"))) {
-            // Key state manipulation: temporarily release the physical sneak keybind
-            Object keyBindSneak = McAccess.getObject(McAccess.gameSettings(), "field_74311_E");
-            if (keyBindSneak != null) {
-                Object keyCode = McAccess.invoke(keyBindSneak, "func_151463_i", new Class<?>[0]);
-                if (keyCode instanceof Integer) {
-                    Class<?> kb = McAccess.gameClass("net.minecraft.client.settings.KeyBinding");
-                    McAccess.invokeStatic(kb, "func_74510_a",
-                            new Class<?>[]{int.class, boolean.class}, keyCode, false);
-                }
-            }
+                && isManualSneak() && local != null && (placed || !local.onGround)) {
+            Mc.setKeyBindState(Mc.settings().keyBindSneak, false);
             forceRelease = true;
         } else if (forceRelease) {
             // Keep released
@@ -439,24 +362,15 @@ public final class BridgeAssistModule extends Module implements PacketListener {
         sneakingFromModule = false;
         placed = false;
         if (resetDelay) resetUnsneakTimers();
-        McAccess.setSneaking(player, false);
+        Mc.setSneaking(player, false);
     }
 
-    /** If sneak key was force-released, re-press it so vanilla sneak resumes. */
-    private void repressSneak(Object player) {
+    private void repressSneak(EntityPlayerSP player) {
         if (forceRelease && isManualSneak()) {
-            Object keyBindSneak = McAccess.getObject(McAccess.gameSettings(), "field_74311_E");
-            if (keyBindSneak != null) {
-                Object keyCode = McAccess.invoke(keyBindSneak, "func_151463_i", new Class<?>[0]);
-                if (keyCode instanceof Integer) {
-                    Class<?> kb = McAccess.gameClass("net.minecraft.client.settings.KeyBinding");
-                    McAccess.invokeStatic(kb, "func_74510_a",
-                            new Class<?>[]{int.class, boolean.class}, keyCode, true);
-                }
-            }
+            Mc.setKeyBindState(Mc.settings().keyBindSneak, true);
             forceSneak = true;
             sneakingFromModule = true;
-            McAccess.setSneaking(player, true);
+            Mc.setSneaking(player, true);
         }
         forceRelease = false;
     }
@@ -466,8 +380,7 @@ public final class BridgeAssistModule extends Module implements PacketListener {
         resetUnsneakTimers();
         forceSneak = false;
         suppressSneak = false;
-        // If sneak key is still physically held, repress so vanilla takes over
-        repressSneak(McAccess.thePlayer());
+        repressSneak(Mc.player());
     }
 
     private void clearSneakState() {
@@ -475,19 +388,12 @@ public final class BridgeAssistModule extends Module implements PacketListener {
         forceSneak = false;
         suppressSneak = false;
         resetUnsneakTimers();
-        McAccess.setSneaking(McAccess.thePlayer(), false);
+        Mc.setSneaking(Mc.player(), false);
     }
 
     // ── Edge detection ───────────────────────────────────────────────────
 
-    /**
-     * Compute whether the player is near an edge using the given AABB coordinates.
-     * Returns true when the Chebyshev distance from center to the nearest
-     * ground block exceeds edgeOffset.
-     *
-     * @param coords  AABB coordinates (may be a predicted/offset bounding box)
-     */
-    private boolean computeNearEdge(AABBCoords coords, Object world) {
+    private boolean computeNearEdge(AABBCoords coords, World world) {
         if (coords == null) return false;
 
         int by = (int) Math.floor(coords.minY - 0.01);
@@ -518,12 +424,7 @@ public final class BridgeAssistModule extends Module implements PacketListener {
         return hasGround && minDist > edgeOffset.getValue();
     }
 
-    /**
-     * Compute the numeric edge distance (without hysteresis) for unsneak delay.
-     *
-     * @param coords  AABB coordinates (may be a predicted/offset bounding box)
-     */
-    private double computeEdgeDistance(AABBCoords coords, Object world) {
+    private double computeEdgeDistance(AABBCoords coords, World world) {
         if (coords == null) return Double.NaN;
 
         int by = (int) Math.floor(coords.minY - 0.01);
@@ -554,21 +455,17 @@ public final class BridgeAssistModule extends Module implements PacketListener {
 
     private static final int[] SIDE_ORDINALS = {2, 3, 4, 5}; // NORTH, SOUTH, EAST, WEST
 
-    /**
-     * Find candidate block faces at the player's feet for block placement.
-     * Checks each block below the player's bounding box for horizontal faces
-     * that lead to air blocks (placeable positions).
-     */
-    private java.util.List<FaceTarget> findFaceTargets(Object player, Object world) {
-        java.util.List<FaceTarget> targets = new java.util.ArrayList<>();
-        Object aabb = McAccess.invoke(player, "func_174813_aQ", new Class<?>[0]);
-        if (aabb == null) return targets;
+    private List<FaceTarget> findFaceTargets(EntityPlayerSP player, World world) {
+        List<FaceTarget> targets = new ArrayList<>();
+        AxisAlignedBB aabb = player.getEntityBoundingBox();
+        if (aabb == null)
+            return targets;
 
-        double minX = McAccess.getDouble(aabb, "field_72340_a");
-        double maxX = McAccess.getDouble(aabb, "field_72336_d");
-        double minY = McAccess.getDouble(aabb, "field_72338_b");
-        double minZ = McAccess.getDouble(aabb, "field_72339_c");
-        double maxZ = McAccess.getDouble(aabb, "field_72334_f");
+        double minX = aabb.minX;
+        double maxX = aabb.maxX;
+        double minY = aabb.minY;
+        double minZ = aabb.minZ;
+        double maxZ = aabb.maxZ;
 
         int standY = (int) Math.floor(minY) - 1;
         int bxLo = (int) Math.floor(minX);
@@ -578,19 +475,13 @@ public final class BridgeAssistModule extends Module implements PacketListener {
 
         for (int x = bxLo; x <= bxHi; x++) {
             for (int z = bzLo; z <= bzHi; z++) {
-                // Check if the block at standY is solid (not air/replaceable)
                 if (isAirBlock(world, x, standY, z))
                     continue;
-                // For each horizontal face, check if the adjacent position is air
-                // Face ordinals: 2=NORTH(-Z), 3=SOUTH(+Z), 4=WEST(-X), 5=EAST(+X)
                 for (int face : SIDE_ORDINALS) {
                     int nx = x + (face == 4 ? -1 : face == 5 ? 1 : 0);
                     int nz = z + (face == 2 ? -1 : face == 3 ? 1 : 0);
                     if (isAirBlock(world, nx, standY, nz)) {
-                        Object blockPos = createBlockPos(x, standY, z);
-                        if (blockPos != null) {
-                            targets.add(new FaceTarget(blockPos, face));
-                        }
+                        targets.add(new FaceTarget(new BlockPos(x, standY, z), face));
                     }
                 }
             }
@@ -598,178 +489,45 @@ public final class BridgeAssistModule extends Module implements PacketListener {
         return targets;
     }
 
-    // ── MC helpers (reflection-based) ────────────────────────────────────
+    // ── MC helpers ───────────────────────────────────────────────────────
 
-    private static boolean isAirBlock(Object world, int x, int y, int z) {
-        Object pos = McAccess.newInstance("net.minecraft.util.BlockPos",
-                new Class<?>[]{int.class, int.class, int.class}, x, y, z);
-        if (pos == null) return true;
-        Class<?> blockPosCls = McAccess.gameClass("net.minecraft.util.BlockPos");
-        Object r = McAccess.invoke(world, "func_175623_d", new Class<?>[]{blockPosCls}, pos);
-        return !(r instanceof Boolean) || (Boolean) r;
+    private static boolean isAirBlock(World world, int x, int y, int z) {
+        return world.isAirBlock(new BlockPos(x, y, z));
     }
 
-    private static Object createBlockPos(int x, int y, int z) {
-        return McAccess.newInstance("net.minecraft.util.BlockPos",
-                new Class<?>[]{int.class, int.class, int.class}, x, y, z);
-    }
-
-    private boolean isHoldingBlock() {
-        Object player = McAccess.thePlayer();
-        if (player == null) return false;
-        Object stack = McAccess.invoke(player, "func_70694_bm", new Class<?>[0]);
-        if (stack == null) return false;
-        Object item = McAccess.invoke(stack, "func_77973_b", new Class<?>[0]);
-        if (item == null) return false;
-        Class<?> itemBlock = McAccess.gameClass("net.minecraft.item.ItemBlock");
-        return itemBlock != null && itemBlock.isInstance(item);
+    private boolean isHoldingBlock(EntityPlayerSP player) {
+        if (player == null)
+            return false;
+        ItemStack stack = player.getHeldItem();
+        return stack != null && stack.getItem() instanceof ItemBlock;
     }
 
     private boolean isManualSneak() {
-        Object keyBindSneak = McAccess.getObject(McAccess.gameSettings(), "field_74311_E");
-        if (keyBindSneak == null) return false;
-        Object down = McAccess.invoke(keyBindSneak, "func_151470_d", new Class<?>[0]);
-        return down instanceof Boolean && (Boolean) down;
+        return Mc.isSneakKeyHeld();
     }
 
-    /** Check if jump keybind is held. */
     private boolean isJumpHeld() {
-        Object keyBindJump = McAccess.getObject(McAccess.gameSettings(), "field_74314_A");
-        if (keyBindJump == null) return false;
-        Object down = McAccess.invoke(keyBindJump, "func_151470_d", new Class<?>[0]);
-        return down instanceof Boolean && (Boolean) down;
+        return Mc.isJumpKeyHeld();
     }
 
-    /** Check forward keybind or movementInput.moveForward > 0. */
-    private boolean isMovingForward() {
-        Object player = McAccess.thePlayer();
-        if (player == null) return false;
-        Object movInput = McAccess.getObject(player, "field_71158_b");
-        if (movInput == null) return false;
-        try {
-            Field f = findField(movInput.getClass(), "moveForward", "field_78902_a");
-            if (f != null) return f.getFloat(movInput) > 0.0f;
-        } catch (Exception ignored) {}
-        return false;
+    private boolean isMovingForward(EntityPlayerSP player) {
+        if (player == null || player.movementInput == null)
+            return false;
+        return player.movementInput.moveForward > 0.0f;
     }
 
-    /** Any WASD movement. */
-    private boolean isMoving() {
-        Object player = McAccess.thePlayer();
-        if (player == null) return false;
-        Object movInput = McAccess.getObject(player, "field_71158_b");
-        if (movInput == null) return false;
-        try {
-            Field fFwd = findField(movInput.getClass(), "moveForward", "field_78902_a");
-            Field fStr = findField(movInput.getClass(), "moveStrafe", "field_78900_b");
-            if (fFwd != null && fStr != null) {
-                return fFwd.getFloat(movInput) != 0.0f || fStr.getFloat(movInput) != 0.0f;
-            }
-        } catch (Exception ignored) {}
-        return false;
+    private boolean isMoving(EntityPlayerSP player) {
+        if (player == null || player.movementInput == null)
+            return false;
+        MovementInput input = player.movementInput;
+        return input.moveForward != 0.0f || input.moveStrafe != 0.0f;
     }
 
-    /** Get block reach distance from PlayerControllerMP. */
     private double getBlockReachDistance() {
-        Object controller = McAccess.playerController();
-        if (controller == null) return 4.5;
-        try {
-            Class<?> ctrlCls = controller.getClass();
-            for (String name : new String[]{"blockReachDistance", "field_78788_d"}) {
-                for (Class<?> cls = ctrlCls; cls != null; cls = cls.getSuperclass()) {
-                    try {
-                        Field f = cls.getDeclaredField(name);
-                        f.setAccessible(true);
-                        if (f.getType() == double.class)
-                            return f.getDouble(controller);
-                        if (f.getType() == float.class)
-                            return f.getFloat(controller);
-                    } catch (NoSuchFieldException ignored) {}
-                }
-            }
-        } catch (Exception ignored) {}
-        return 4.5;
+        PlayerControllerMP controller = Mc.controller();
+        return controller != null ? controller.getBlockReachDistance() : 4.5;
     }
 
-    /** Ray-cast from the player's eyes at the given yaw/pitch. Returns
-     * MovingObjectPosition or null. */
-    private Object rayCast(double reach, float yaw, float pitch) {
-        Object player = McAccess.thePlayer();
-        if (player == null) return null;
-
-        // Get player eye position (posY + eyeHeight)
-        double ex = McAccess.entityPosX(player);
-        double ey = McAccess.entityPosY(player);
-        double ez = McAccess.entityPosZ(player);
-        // Entity.getEyeHeight() = func_70047_e() in 1.8.9
-        Float eyeHeight = null;
-        try {
-            Object eh = McAccess.invoke(player, "func_70047_e", new Class<?>[0]);
-            if (eh instanceof Float) eyeHeight = (Float) eh;
-        } catch (Exception ignored) {}
-        if (eyeHeight == null) eyeHeight = 1.62f;
-        ey += eyeHeight;
-
-        // Compute direction vector from yaw/pitch
-        float yawRad = (float) Math.toRadians(yaw);
-        float pitchRad = (float) Math.toRadians(pitch);
-        float cosPitch = (float) Math.cos(pitchRad);
-        float dx = -MathHelper.sin(yawRad) * cosPitch;
-        float dy = -MathHelper.sin(pitchRad);
-        float dz = MathHelper.cos(yawRad) * cosPitch;
-
-        double endX = ex + dx * reach;
-        double endY = ey + dy * reach;
-        double endZ = ez + dz * reach;
-
-        // Invoke World.rayTraceBlocks(start, end, stopOnLiquid, ignoreBlockWithoutBoundingBox, returnLastUncollidable)
-        try {
-            Class<?> vec3Cls = McAccess.gameClass("net.minecraft.util.Vec3");
-            if (vec3Cls == null) return null;
-            Object startVec = McAccess.newInstance("net.minecraft.util.Vec3",
-                    new Class<?>[]{double.class, double.class, double.class}, ex, ey, ez);
-            Object endVec = McAccess.newInstance("net.minecraft.util.Vec3",
-                    new Class<?>[]{double.class, double.class, double.class}, endX, endY, endZ);
-            Object world = McAccess.theWorld();
-            if (world == null || startVec == null || endVec == null) return null;
-
-            return McAccess.invoke(world, "func_147447_a",
-                    new Class<?>[]{vec3Cls, vec3Cls, boolean.class, boolean.class, boolean.class},
-                    startVec, endVec, false, false, false);
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    /** Get the sideHit ordinal from a MovingObjectPosition. Returns -1 on failure.
-     * EnumFacing ordinals: 0=DOWN, 1=UP, 2=NORTH, 3=SOUTH, 4=WEST, 5=EAST. */
-    private int getSideHit(Object mop) {
-        try {
-            Object sideHit = McAccess.getObject(mop, "field_178784_b");
-            if (sideHit == null) return -1;
-            return McAccess.getInt(sideHit, "ordinal");
-        } catch (Exception ignored) {
-            return -1;
-        }
-    }
-
-    /** Get the BlockPos from a MovingObjectPosition. */
-    private Object getHitBlockPos(Object mop) {
-        try {
-            return McAccess.invoke(mop, "func_178782_a", new Class<?>[0]);
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    /** Check if two BlockPos objects represent the same coordinates. */
-    private boolean blockPosEquals(Object a, Object b) {
-        if (a == b) return true;
-        if (a == null || b == null) return false;
-        return a.equals(b);
-    }
-
-    /** Smooth rotation interpolation with max step and randomized smoothing. */
     private float smoothRotation(float current, float target, float maxStep, float smoothFactor) {
         float delta = target - current;
         if (Math.abs(delta) > maxStep) {
@@ -802,115 +560,70 @@ public final class BridgeAssistModule extends Module implements PacketListener {
         return v;
     }
 
-    // ── MathHelper shim (reflects Minecraft's MathHelper) ────────────────
-
-    /**
-     * Minimal shim for sine/cosine used in ray-cast. In 1.8.9,
-     * MathHelper.sin/cos use a lookup table; our approx is close enough
-     * for ray-cast direction vectors.
-     */
-    private static final class MathHelper {
-        static float sin(float radians) {
-            return (float) Math.sin(radians);
-        }
-        static float cos(float radians) {
-            return (float) Math.cos(radians);
-        }
-    }
-
     // ── Inner types ──────────────────────────────────────────────────────
 
     private static class FaceTarget {
-        final Object block; // BlockPos
-        final int face;     // EnumFacing ordinal (2=NORTH, 3=SOUTH, 4=WEST, 5=EAST)
-        FaceTarget(Object block, int face) {
+        final BlockPos block;
+        final int face;
+
+        FaceTarget(BlockPos block, int face) {
             this.block = block;
             this.face = face;
         }
     }
 
-    // ── Predicted AABB data holder ───────────────────────────────────────
-
-    /**
-     * Simple holder for AABB coordinates, used for predictive edge detection.
-     */
     private static final class AABBCoords {
         final double minX, maxX, minY, minZ, maxZ;
+
         AABBCoords(double minX, double maxX, double minY, double minZ, double maxZ) {
-            this.minX = minX; this.maxX = maxX; this.minY = minY;
-            this.minZ = minZ; this.maxZ = maxZ;
+            this.minX = minX;
+            this.maxX = maxX;
+            this.minY = minY;
+            this.minZ = minZ;
+            this.maxZ = maxZ;
         }
     }
 
-    /**
-     * Compute the player's predicted AABB shifted by estimated motion for one
-     * tick WITHOUT sneak (predictive edge detection). Mirrors Raven's
-     * {@code SimulatedPlayer.fromClientPlayer(...).tick()} approach using
-     * simple velocity projection instead of full physics simulation.
-     *
-     * <p>If {@link #forceSneak} is true (module was sneaking last tick), the
-     * current motionX/motionZ are already sneak-scaled by 0.3. We unscale them
-     * by 1/0.3 to estimate what the motion would be without sneak.</p>
-     */
-    private AABBCoords computePredictedAABB(Object player) {
-        Object aabb = McAccess.invoke(player, "func_174813_aQ", new Class<?>[0]);
-        if (aabb == null) return null;
+    private AABBCoords computePredictedAABB(EntityPlayerSP player) {
+        AxisAlignedBB aabb = player.getEntityBoundingBox();
+        if (aabb == null)
+            return null;
 
-        double minX = McAccess.getDouble(aabb, "field_72340_a");
-        double maxX = McAccess.getDouble(aabb, "field_72336_d");
-        double minY = McAccess.getDouble(aabb, "field_72338_b");
-        double minZ = McAccess.getDouble(aabb, "field_72339_c");
-        double maxZ = McAccess.getDouble(aabb, "field_72334_f");
+        double minX = aabb.minX;
+        double maxX = aabb.maxX;
+        double minY = aabb.minY;
+        double minZ = aabb.minZ;
+        double maxZ = aabb.maxZ;
 
-        // Read current velocity (after this tick's movement)
-        double motionX = McAccess.getDouble(player, "field_70159_w"); // motionX SRG
-        double motionZ = McAccess.getDouble(player, "field_70179_y"); // motionZ SRG
+        double motionX = player.motionX;
+        double motionZ = player.motionZ;
 
-        // If the module was sneaking last tick, current motion is already
-        // sneak-scaled (0.3x). Unscale to estimate unsnuck motion.
         if (forceSneak) {
             motionX /= 0.3;
             motionZ /= 0.3;
         }
 
-        // No prediction needed for zero-velocity (standing still or falling)
         if (motionX == 0.0 && motionZ == 0.0) {
             return new AABBCoords(minX, maxX, minY, minZ, maxZ);
         }
 
-        // If the player has forward/strafe input, they'll accelerate next tick.
-        // Read movementInput to account for acceleration.
-        // SRG: movementInput = field_71158_b
-        Object movInput = McAccess.getObject(player, "field_71158_b");
+        MovementInput movInput = player.movementInput;
         if (movInput != null) {
-            try {
-                Field fFwd = findField(movInput.getClass(), "moveForward", "field_78902_a");
-                Field fStr = findField(movInput.getClass(), "moveStrafe", "field_78900_b");
-                if (fFwd != null && fStr != null) {
-                    float forward = fFwd.getFloat(movInput);
-                    float strafe = fStr.getFloat(movInput);
-                    if (forward != 0.0f || strafe != 0.0f) {
-                        // Vanilla ground acceleration: forward*0.98, speed=0.02
-                        float yawRad = (float) Math.toRadians(
-                                McAccess.getFloat(player, "field_70177_z"));
-                        float f = forward * 0.98f;
-                        float s = strafe * 0.98f;
-                        double accelX = (s * MathHelper.cos(yawRad)
-                                - f * MathHelper.sin(yawRad)) * 0.02;
-                        double accelZ = (f * MathHelper.cos(yawRad)
-                                + s * MathHelper.sin(yawRad)) * 0.02;
-                        // Apply ground friction (0.91) + acceleration to estimate
-                        // next tick's unsnuck motion
-                        motionX = motionX * 0.91 + accelX;
-                        motionZ = motionZ * 0.91 + accelZ;
-                    }
-                }
-            } catch (Exception ignored) {
-                // Fall through to motionXZ-only projection below
+            float forward = movInput.moveForward;
+            float strafe = movInput.moveStrafe;
+            if (forward != 0.0f || strafe != 0.0f) {
+                float yawRad = (float) Math.toRadians(player.rotationYaw);
+                float f = forward * 0.98f;
+                float s = strafe * 0.98f;
+                double accelX = (s * MathHelper.cos(yawRad)
+                        - f * MathHelper.sin(yawRad)) * 0.02;
+                double accelZ = (f * MathHelper.cos(yawRad)
+                        + s * MathHelper.sin(yawRad)) * 0.02;
+                motionX = motionX * 0.91 + accelX;
+                motionZ = motionZ * 0.91 + accelZ;
             }
         }
 
-        // Shift AABB by the predicted motion
         return new AABBCoords(
                 minX + motionX, maxX + motionX, minY,
                 minZ + motionZ, maxZ + motionZ

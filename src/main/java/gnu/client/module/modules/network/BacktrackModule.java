@@ -6,7 +6,8 @@ import gnu.client.module.ModuleManager;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.mixin.impl.accessors.IAccessorC02PacketUseEntity;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.BacktrackTargetPosition;
 import gnu.client.runtime.packet.InboundLagCoordinator;
 import gnu.client.runtime.packet.PacketEvents;
@@ -14,6 +15,17 @@ import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
 import gnu.client.runtime.packet.PacketUtil;
 import gnu.client.util.RenderHelper;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.multiplayer.WorldClient;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.item.ItemAxe;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.ItemSword;
+import net.minecraft.network.play.client.C02PacketUseEntity;
+import net.minecraft.network.play.server.S06PacketUpdateHealth;
+import net.minecraft.network.play.server.S13PacketDestroyEntities;
 
 import org.lwjgl.opengl.GL11;
 
@@ -89,7 +101,7 @@ public final class BacktrackModule extends Module implements PacketListener {
     private final BacktrackTargetPosition position = new BacktrackTargetPosition();
     private final Deque<TrailPoint> serverTrail = new ArrayDeque<>();
 
-    private Object target;
+    private EntityLivingBase target;
     private int targetEntityId = -1;
 
     private long nextBacktrackAllowedAtMs;
@@ -137,14 +149,13 @@ public final class BacktrackModule extends Module implements PacketListener {
     public void onTick() {
         if (!isEnabled())
             return;
-        Object mc = McAccess.getMinecraft();
-        Object player = McAccess.thePlayer(mc);
-        Object world = McAccess.theWorld(mc);
+        EntityPlayerSP player = Mc.player();
+        WorldClient world = Mc.world();
         if (player == null || world == null) {
             clear(false, true, true);
             return;
         }
-        if (McAccess.currentScreen(mc) != null) {
+        if (Mc.currentScreen() != null) {
             clear(false, true, true);
             return;
         }
@@ -183,38 +194,39 @@ public final class BacktrackModule extends Module implements PacketListener {
         if (!PacketHelper.isUseEntity(packet))
             return false;
 
-        Object action = McAccess.invoke(packet, "func_149565_c", new Class<?>[0]);
-        if (action == null)
-            action = McAccess.invokeNamed(packet, "getAction", new Class<?>[0]);
-        if (action == null || !String.valueOf(action).contains("ATTACK"))
+        if (!(packet instanceof C02PacketUseEntity))
             return false;
 
-        Object world = McAccess.theWorld();
-        int attackedId = resolveUseEntityTargetId(packet, world);
+        C02PacketUseEntity use = (C02PacketUseEntity) packet;
+        if (use.getAction() != C02PacketUseEntity.Action.ATTACK)
+            return false;
+
+        WorldClient world = Mc.world();
+        int attackedId = resolveUseEntityTargetId(use, world);
         if (attackedId < 0)
             return false;
-        Object enemy = entityById(world, attackedId);
-        if (enemy == null)
+        Entity enemy = entityById(world, attackedId);
+        if (!(enemy instanceof EntityLivingBase))
             return false;
 
-        Object player = McAccess.thePlayer(McAccess.getMinecraft());
+        EntityPlayerSP player = Mc.player();
         if (player == null)
             return false;
 
-        noteAttack(enemy, player);
+        noteAttack((EntityLivingBase) enemy, player);
         return false;
     }
 
     public void noteForgeAttack(Object enemy) {
-        if (!isEnabled() || enemy == null)
+        if (!isEnabled() || !(enemy instanceof EntityLivingBase))
             return;
-        Object player = McAccess.thePlayer(McAccess.getMinecraft());
+        EntityPlayerSP player = Mc.player();
         if (player == null)
             return;
-        noteAttack(enemy, player);
+        noteAttack((EntityLivingBase) enemy, player);
     }
 
-    private void noteAttack(Object enemy, Object player) {
+    private void noteAttack(EntityLivingBase enemy, EntityPlayerSP player) {
         lastAttackMs = System.currentTimeMillis();
         rolledChance = (float) (Math.random() * 100.0);
 
@@ -256,7 +268,7 @@ public final class BacktrackModule extends Module implements PacketListener {
         if (PacketHelper.isBacktrackPassThrough(packet))
             return false;
 
-        Object world = McAccess.theWorld(McAccess.getMinecraft());
+        Object world = Mc.world();
         if (!PacketHelper.isBacktrackQueueCandidate(packet, targetEntityId, world))
             return false;
 
@@ -264,7 +276,7 @@ public final class BacktrackModule extends Module implements PacketListener {
             position.setBaseFromEntity(target);
         position.applyPacket(packet);
 
-        Object player = McAccess.thePlayer(McAccess.getMinecraft());
+        EntityPlayerSP player = Mc.player();
         if (mode.getValue() == 1 && shouldSmartFlush(player)) {
             flushAllIncoming();
             position.setBaseFromEntity(target);
@@ -288,7 +300,7 @@ public final class BacktrackModule extends Module implements PacketListener {
 
     @Override
     public void onRender(float partialTicks) {
-        if (!enableVisuals.getValue() || !isLagging() || !McAccess.isInGame() || target == null)
+        if (!enableVisuals.getValue() || !isLagging() || !Mc.isInGame() || target == null)
             return;
         resyncTrackedPosition();
         if (!position.isValid())
@@ -299,10 +311,9 @@ public final class BacktrackModule extends Module implements PacketListener {
         double sy = ghost[1];
         double sz = ghost[2];
 
-        Object mc = McAccess.getMinecraft();
-        double[] vp = McAccess.getViewerPos(mc, partialTicks);
+        double[] vp = Mc.getViewerPos(partialTicks);
         float alpha = pulseAlpha();
-        boolean hurtFlash = enableHurt.getValue() && McAccess.getInt(target, "field_70737_aN") > 0;
+        boolean hurtFlash = enableHurt.getValue() && target.hurtTime > 0;
 
         float br = boxColorR.getValue() / 255.0f;
         float bg = boxColorG.getValue() / 255.0f;
@@ -359,7 +370,7 @@ public final class BacktrackModule extends Module implements PacketListener {
         return targetEntityId;
     }
 
-    private void processTarget(Object enemy, Object player) {
+    private void processTarget(EntityLivingBase enemy, EntityPlayerSP player) {
         shouldPauseTarget = isLivingEntity(enemy) && shouldPauseForHurtTime(enemy);
 
         if (!shouldBacktrack(enemy, player))
@@ -369,7 +380,7 @@ public final class BacktrackModule extends Module implements PacketListener {
             clear(true, false, false);
 
         target = enemy;
-        targetEntityId = McAccess.entityId(enemy);
+        targetEntityId = Mc.entityId(enemy);
         position.setBaseFromEntity(enemy);
     }
 
@@ -479,7 +490,7 @@ public final class BacktrackModule extends Module implements PacketListener {
         }
     }
 
-    private void refreshAttackTarget(Object player) {
+    private void refreshAttackTarget(EntityPlayerSP player) {
         if (target == null)
             return;
         shouldPauseTarget = isLivingEntity(target) && shouldPauseForHurtTime(target);
@@ -498,7 +509,7 @@ public final class BacktrackModule extends Module implements PacketListener {
         }
     }
 
-    private boolean shouldBacktrack(Object enemy, Object player) {
+    private boolean shouldBacktrack(EntityLivingBase enemy, EntityPlayerSP player) {
         if (holdingWeapon.getValue() && !isHoldingWeapon(player))
             return false;
 
@@ -513,8 +524,7 @@ public final class BacktrackModule extends Module implements PacketListener {
         if (!shouldAttackEntity(enemy, player))
             return false;
 
-        int ticks = McAccess.getInt(player, "field_70173_aa");
-        if (ticks <= 10)
+        if (player.ticksExisted <= 10)
             return false;
 
         if (now < nextBacktrackAllowedAtMs)
@@ -543,13 +553,13 @@ public final class BacktrackModule extends Module implements PacketListener {
         return true;
     }
 
-    private boolean isInDistanceRange(Object player, Object entity) {
+    private boolean isInDistanceRange(EntityPlayerSP player, EntityLivingBase entity) {
         double dist = boxedDistanceTo(player, entity);
         return dist >= distanceMin.getValue() && dist <= distanceMax.getValue();
     }
 
     /** Advanced mode: flush when tracked server position is closer than the rendered entity. */
-    private boolean shouldSmartFlush(Object player) {
+    private boolean shouldSmartFlush(EntityPlayerSP player) {
         if (target == null || !position.isValid())
             return false;
         double ghostDist = squaredBoxDistanceToGhost(player);
@@ -557,12 +567,12 @@ public final class BacktrackModule extends Module implements PacketListener {
         return ghostDist + 0.01 < visibleDist;
     }
 
-    private double squaredBoxDistanceToGhost(Object player) {
-        double px = McAccess.getDouble(player, "field_70165_t");
-        double py = McAccess.getDouble(player, "field_70163_u");
-        double pz = McAccess.getDouble(player, "field_70161_v");
-        double halfW = target != null ? McAccess.getFloat(target, "field_70130_N") * 0.5f : 0.3f;
-        double height = target != null ? McAccess.getFloat(target, "field_70131_O") : 1.8;
+    private double squaredBoxDistanceToGhost(EntityPlayerSP player) {
+        double px = player.posX;
+        double py = player.posY;
+        double pz = player.posZ;
+        double halfW = target != null ? target.width * 0.5f : 0.3f;
+        double height = target != null ? target.height : 1.8;
         double ex = position.x();
         double ey = position.y();
         double ez = position.z();
@@ -576,7 +586,7 @@ public final class BacktrackModule extends Module implements PacketListener {
     }
 
     private boolean shouldCancelPackets() {
-        Object player = McAccess.thePlayer(McAccess.getMinecraft());
+        EntityPlayerSP player = Mc.player();
         if (player == null || target == null || !isEntityAlive(target))
             return false;
         return shouldBacktrack(target, player);
@@ -649,30 +659,22 @@ public final class BacktrackModule extends Module implements PacketListener {
         };
     }
 
-    private boolean shouldPauseForHurtTime(Object entity) {
+    private boolean shouldPauseForHurtTime(EntityLivingBase entity) {
         int maxTicks = maxHurtTimeTicks();
         if (maxTicks <= 0)
             return false;
-        return McAccess.getInt(entity, "field_70737_aN") >= maxTicks;
+        return entity.hurtTime >= maxTicks;
     }
 
     private int maxHurtTimeTicks() {
         return Math.max(0, (int) (hurtTime.getValue() / 50.0f));
     }
 
-    private boolean isHoldingWeapon(Object player) {
-        Object stack = McAccess.invoke(player, "func_70694_bm", new Class<?>[0]);
-        if (stack == null)
-            stack = McAccess.invokeNamed(player, "getHeldItem", new Class<?>[0]);
+    private boolean isHoldingWeapon(EntityPlayerSP player) {
+        ItemStack stack = player.getHeldItem();
         if (stack == null)
             return false;
-        Object item = McAccess.invoke(stack, "func_77973_b", new Class<?>[0]);
-        if (item == null)
-            item = McAccess.invokeNamed(stack, "getItem", new Class<?>[0]);
-        if (item == null)
-            return false;
-        String name = item.getClass().getName();
-        return name.contains("ItemSword") || name.contains("ItemAxe");
+        return stack.getItem() instanceof ItemSword || stack.getItem() instanceof ItemAxe;
     }
 
     private boolean shouldPassOrFlushPacket(Object packet) {
@@ -682,104 +684,75 @@ public final class BacktrackModule extends Module implements PacketListener {
             clear(true, false, true);
             return true;
         }
-        if (PacketHelper.isUpdateHealth(packet)) {
-            Object health = McAccess.invoke(packet, "func_71165_d", new Class<?>[0]);
-            if (health instanceof Float && (Float) health <= 0f) {
+        if (packet instanceof S06PacketUpdateHealth) {
+            if (((S06PacketUpdateHealth) packet).getHealth() <= 0f) {
                 clear(true, false, true);
                 return true;
             }
         }
-        if (PacketHelper.isDestroyEntities(packet) && targetEntityId >= 0) {
-            Object ids = McAccess.invokeNamed(packet, "getEntityIDs", new Class<?>[0]);
-            if (ids == null)
-                ids = McAccess.getObject(packet, "field_149074_i");
-            if (ids instanceof int[]) {
-                for (int id : (int[]) ids) {
-                    if (id == targetEntityId) {
-                        clear(true, false, true);
-                        return true;
-                    }
+        if (packet instanceof S13PacketDestroyEntities && targetEntityId >= 0) {
+            for (int id : ((S13PacketDestroyEntities) packet).getEntityIDs()) {
+                if (id == targetEntityId) {
+                    clear(true, false, true);
+                    return true;
                 }
             }
         }
         return false;
     }
 
-    private static boolean shouldAttackEntity(Object entity, Object player) {
+    private static boolean shouldAttackEntity(EntityLivingBase entity, EntityPlayerSP player) {
         if (entity == null || entity == player)
             return false;
-        if (!isEntityPlayer(entity))
+        if (!(entity instanceof EntityPlayer))
             return false;
         return isEntityAlive(entity);
     }
 
-    private static boolean isLivingEntity(Object entity) {
-        return entity != null && isEntityPlayer(entity);
+    private static boolean isLivingEntity(EntityLivingBase entity) {
+        return entity instanceof EntityPlayer;
     }
 
-    private static boolean isEntityPlayer(Object entity) {
-        Class<?> c = entity.getClass();
-        while (c != null) {
-            if (c.getName().contains("EntityPlayer"))
-                return true;
-            c = c.getSuperclass();
-        }
-        return false;
+    private static boolean isEntityAlive(EntityLivingBase entity) {
+        return entity != null && !entity.isDead && entity.deathTime <= 0;
     }
 
-    private static boolean isEntityAlive(Object entity) {
-        if (entity == null)
-            return false;
-        Object dead = McAccess.invokeNamed(entity, "isDead", new Class<?>[0]);
-        if (dead instanceof Boolean)
-            return !(Boolean) dead;
-        return McAccess.getInt(entity, "field_70725_aQ") <= 0;
-    }
-
-    private static Object entityById(Object world, int entityId) {
+    private static Entity entityById(WorldClient world, int entityId) {
         if (world == null || entityId < 0)
             return null;
-        Object entitiesObj = McAccess.getObject(world, "field_73010_i");
-        if (!(entitiesObj instanceof Iterable))
-            return null;
-        for (Object entity : (Iterable<?>) entitiesObj) {
-            if (entity != null && McAccess.entityId(entity) == entityId)
+        for (Entity entity : world.loadedEntityList) {
+            if (entity != null && Mc.entityId(entity) == entityId)
                 return entity;
         }
         return null;
     }
 
-    private static int resolveUseEntityTargetId(Object packet, Object world) {
-        int direct = McAccess.getInt(packet, "field_149567_a");
+    private static int resolveUseEntityTargetId(C02PacketUseEntity packet, WorldClient world) {
+        int direct = ((IAccessorC02PacketUseEntity) packet).getEntityId();
         if (direct > 0)
             return direct;
-        Object idObj = McAccess.invokeNamed(packet, "getEntityId", new Class<?>[0]);
-        if (idObj instanceof Integer && (Integer) idObj > 0)
-            return (Integer) idObj;
         if (world != null) {
-            Object entity = McAccess.invoke(packet, "func_149564_a", new Class<?>[] { world.getClass() }, world);
-            if (entity == null)
-                entity = McAccess.invokeNamed(packet, "getEntityFromWorld", new Class<?>[] { world.getClass() }, world);
-            int resolved = McAccess.entityId(entity);
+            Entity entity = packet.getEntityFromWorld(world);
+            int resolved = Mc.entityId(entity);
             if (resolved > 0)
                 return resolved;
         }
         return -1;
     }
 
-    private static double boxedDistanceTo(Object player, Object entity) {
+    private static double boxedDistanceTo(EntityPlayerSP player, EntityLivingBase entity) {
         return Math.sqrt(squaredBoxDistanceTo(player, entity));
     }
 
-    private static double squaredBoxDistanceTo(Object player, Object entity) {
-        double px = McAccess.getDouble(player, "field_70165_t");
-        double py = McAccess.getDouble(player, "field_70163_u");
-        double pz = McAccess.getDouble(player, "field_70161_v");
-        double ex = McAccess.getDouble(entity, "field_70165_t");
-        double ey = McAccess.getDouble(entity, "field_70163_u");
-        double ez = McAccess.getDouble(entity, "field_70161_v");
-        double halfW = McAccess.getFloat(entity, "field_70130_N") * 0.5f;
-        double height = McAccess.getFloat(entity, "field_70131_O");
+    private static double squaredBoxDistanceTo(EntityPlayerSP player, EntityLivingBase entity) {
+        double px = player.posX;
+        double py = player.posY;
+        double pz = player.posZ;
+        double ex = entity.posX;
+        double ey = entity.posY;
+        double ez = entity.posZ;
+        double halfW = entity.width * 0.5f;
+        double height = entity.height;
         double cx = clamp(px, ex - halfW, ex + halfW);
         double cy = clamp(py, ey, ey + height);
         double cz = clamp(pz, ez - halfW, ez + halfW);
@@ -799,8 +772,8 @@ public final class BacktrackModule extends Module implements PacketListener {
         double half = 0.3;
         double height = 1.8;
         if (target != null) {
-            half = McAccess.getFloat(target, "field_70130_N") * 0.5f;
-            height = McAccess.getFloat(target, "field_70131_O");
+            half = target.width * 0.5f;
+            height = target.height;
         }
 
         float drawLw = lw;

@@ -10,6 +10,22 @@
     "client.MixinMinecraft",
     "client.MixinMovementInputFromOptions",
     "render.MixinEntityRenderer",
-    "render.MixinGuiIngame"
+    "render.MixinGuiIngame",
+    "render.MixinRenderManager",
+    "accessors.IAccessorMinecraft",
+    "accessors.IAccessorTimer",
+    "accessors.IAccessorEntityPlayerSP",
+    "accessors.IAccessorPlayerControllerMP",
+    "accessors.IAccessorC03PacketPlayer",
+    "accessors.IAccessorRenderManager",
+    "accessors.IAccessorGameSettings",
+    "accessors.IAccessorEntityLivingBase",
+    "accessors.IAccessorGuiContainer",
+    "accessors.IAccessorS12PacketEntityVelocity",
+    "accessors.IAccessorS27PacketExplosion",
+    "accessors.IAccessorC0CPacketInput",
+    "accessors.IAccessorNetworkPlayerInfo",
+    "accessors.IAccessorS19PacketEntityStatus",
+    "accessors.IAccessorC02PacketUseEntity"
   ]
 }

@@ -1,6 +1,12 @@
 package gnu.client.module.modules.combat;
 
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.entity.Entity;
+import net.minecraft.util.AxisAlignedBB;
+import net.minecraft.util.MovingObjectPosition;
+import net.minecraft.util.Vec3;
+import net.minecraft.world.World;
 
 /**
  * Raven-bS {@code RotationUtils} subset for AimAssist.
@@ -12,20 +18,20 @@ final class RavenRotationUtils {
 
     /** Per-tick eye-position cache (invalidated when player ticksExisted changes). */
     private static int eyeCacheTick = Integer.MIN_VALUE;
-    private static Object eyeCachePlayer;
+    private static Entity eyeCachePlayer;
     private static double[] eyeCache;
 
     private RavenRotationUtils() {}
 
     /** Call once per AimAssist/KillAura tick before distance/FOV/LOS helpers. */
-    static void beginTick(Object player) {
+    static void beginTick(Entity player) {
         if (player == null) {
             eyeCacheTick = Integer.MIN_VALUE;
             eyeCachePlayer = null;
             eyeCache = null;
             return;
         }
-        int tick = McAccess.getInt(player, "field_70173_aa");
+        int tick = player.ticksExisted;
         if (tick == eyeCacheTick && player == eyeCachePlayer && eyeCache != null)
             return;
         eyeCacheTick = tick;
@@ -50,23 +56,23 @@ final class RavenRotationUtils {
         return pitch;
     }
 
-    static float angleToEntity(Object entity) {
-        Object player = McAccess.thePlayer();
+    static float angleToEntity(Entity entity) {
+        EntityPlayerSP player = Mc.player();
         if (player == null || entity == null)
             return 0.0f;
         return (float) (Math.atan2(
-                McAccess.entityPosX(entity) - McAccess.entityPosX(player),
-                McAccess.entityPosZ(entity) - McAccess.entityPosZ(player)) * 57.2957795 * -1.0);
+                entity.posX - player.posX,
+                entity.posZ - player.posZ) * 57.2957795 * -1.0);
     }
 
     /** Cheap center-to-center distance² — use for candidate sorting, not hitbox edge. */
-    static double distanceSqCenters(Object entity) {
-        Object player = McAccess.thePlayer();
+    static double distanceSqCenters(Entity entity) {
+        EntityPlayerSP player = Mc.player();
         if (player == null || entity == null)
             return Double.MAX_VALUE;
-        double dx = McAccess.entityPosX(entity) - McAccess.entityPosX(player);
-        double dy = McAccess.entityPosY(entity) - McAccess.entityPosY(player);
-        double dz = McAccess.entityPosZ(entity) - McAccess.entityPosZ(player);
+        double dx = entity.posX - player.posX;
+        double dy = entity.posY - player.posY;
+        double dz = entity.posZ - player.posZ;
         return dx * dx + dy * dy + dz * dz;
     }
 
@@ -78,9 +84,9 @@ final class RavenRotationUtils {
         return diff >= -half;
     }
 
-    static double distanceSqFromEyeToClosestOnAabb(Object entity) {
-        double[] eye = eyePos(McAccess.thePlayer(), 1.0f);
-        Object bb = expandedBox(entity);
+    static double distanceSqFromEyeToClosestOnAabb(Entity entity) {
+        double[] eye = eyePos(Mc.player(), 1.0f);
+        AxisAlignedBB bb = expandedBox(entity);
         if (eye == null || bb == null)
             return Double.MAX_VALUE;
         if (isVecInside(bb, eye[0], eye[1], eye[2]))
@@ -92,27 +98,57 @@ final class RavenRotationUtils {
         return dx * dx + dy * dy + dz * dz;
     }
 
+    /**
+     * OpenMyau {@code RotationUtil.rayTrace(box, yaw, pitch, distance)} — intercept of
+     * look ray with the entity's expanded collision box. Null = Grim Hitboxes miss.
+     */
+    static MovingObjectPosition rayTraceHitbox(Entity entity, float yaw, float pitch, double distance) {
+        if (entity == null || distance <= 0.0)
+            return null;
+        EntityPlayerSP player = Mc.player();
+        if (player == null)
+            return null;
+        AxisAlignedBB bb = expandedBox(entity);
+        if (bb == null)
+            return null;
+        Vec3 eye = player.getPositionEyes(1.0f);
+        if (eye == null)
+            return null;
+        if (isVecInside(bb, eye.xCoord, eye.yCoord, eye.zCoord))
+            return new MovingObjectPosition(entity, eye);
+        float f = (float) Math.cos(-yaw * 0.017453292F - (float) Math.PI);
+        float f1 = (float) Math.sin(-yaw * 0.017453292F - (float) Math.PI);
+        float f2 = (float) -Math.cos(-pitch * 0.017453292F);
+        float f3 = (float) Math.sin(-pitch * 0.017453292F);
+        Vec3 look = new Vec3(f1 * f2, f3, f * f2);
+        Vec3 end = eye.addVector(look.xCoord * distance, look.yCoord * distance, look.zCoord * distance);
+        return bb.calculateIntercept(eye, end);
+    }
+
+    /** True if look (yaw/pitch) intersects the target hitbox within {@code distance}. */
+    static boolean looksAtHitbox(Entity entity, float yaw, float pitch, double distance) {
+        return rayTraceHitbox(entity, yaw, pitch, distance) != null;
+    }
+
     /** OpenMyau {@code RotationUtil.angleToEntity} — eye inside expanded AABB → always in FOV. */
-    static boolean isEyeInsideExpandedHitbox(Object entity) {
-        double[] eye = eyePos(McAccess.thePlayer(), 1.0f);
-        Object bb = expandedBox(entity);
+    static boolean isEyeInsideExpandedHitbox(Entity entity) {
+        double[] eye = eyePos(Mc.player(), 1.0f);
+        AxisAlignedBB bb = expandedBox(entity);
         return eye != null && bb != null && isVecInside(bb, eye[0], eye[1], eye[2]);
     }
 
-    static double aimDifference(Object entity, float baseYaw) {
+    static double aimDifference(Entity entity, float baseYaw) {
         return ((baseYaw - angleToEntity(entity)) % 360.0 + 540.0) % 360.0 - 180.0;
     }
 
-    static double pitchDifference(Object entity, float basePitch) {
-        double[] eye = eyePos(McAccess.thePlayer(), 1.0f);
-        Object bb = expandedBox(entity);
+    static double pitchDifference(Entity entity, float basePitch) {
+        double[] eye = eyePos(Mc.player(), 1.0f);
+        AxisAlignedBB bb = expandedBox(entity);
         if (eye == null || bb == null)
             return 180.0;
-        double minY = McAccess.getDouble(bb, "field_72338_b");
-        double maxY = McAccess.getDouble(bb, "field_72337_e");
-        double centerY = (minY + maxY) * 0.5;
-        double dx = McAccess.entityPosX(entity) - eye[0];
-        double dz = McAccess.entityPosZ(entity) - eye[2];
+        double centerY = (bb.minY + bb.maxY) * 0.5;
+        double dx = entity.posX - eye[0];
+        double dz = entity.posZ - eye[2];
         double horiz = Math.sqrt(dx * dx + dz * dz);
         float targetPitch = (float) (-(Math.atan2(centerY - eye[1], horiz) * 57.2957795));
         return ((basePitch - targetPitch) % 360.0 + 540.0) % 360.0 - 180.0;
@@ -150,10 +186,6 @@ final class RavenRotationUtils {
         return fixRotation(newYaw, newPitch, baseYaw, basePitch);
     }
 
-    /**
-     * Timewarp: speed is 0–100 (% of remaining angle applied per tick).
-     * Pure percent model — no proximity slowdown, no humanization.
-     */
     private static float smoothAxisPercent(float base, float target, int speedPercent,
             float randomizationPercent, boolean yaw) {
         if (speedPercent <= 0)
@@ -171,7 +203,6 @@ final class RavenRotationUtils {
         return yaw ? smoothed : clampPitch(smoothed);
     }
 
-    /** Raven-bS legacy: speed 1–30, quadratic step up to 180 deg/tick at 30. */
     private static float smoothAxisRaven(float base, float target, int speed,
             float randomizationPercent, boolean yaw) {
         if (speed <= 0)
@@ -206,12 +237,11 @@ final class RavenRotationUtils {
         return prevYaw + ((((yaw - prevYaw + 180.0f) % 360.0f) + 360.0f) % 360.0f - 180.0f);
     }
 
-    /** Raven-bS {@code fixRotation} — per-tick delta is a multiple of sensitivity GCD. */
     static float[] fixRotation(float targetYaw, float targetPitch, float yaw, float pitch) {
         targetYaw = unwrapYaw(targetYaw, yaw);
         float deltaYaw = targetYaw - yaw;
         float deltaPitch = targetPitch - pitch;
-        double gcd = McAccess.getMouseSensitivityGcd();
+        double gcd = Mc.getMouseSensitivityGcd();
         if (gcd <= 0.0)
             return new float[] { targetYaw, clampPitch(targetPitch) };
 
@@ -220,7 +250,7 @@ final class RavenRotationUtils {
         return new float[] { yaw + qYaw, clampPitch(pitch + qPitch) };
     }
 
-    static float[] getRotationsToTarget(Object entity, int speed,
+    static float[] getRotationsToTarget(Entity entity, int speed,
             double horizontalMultipoint, double verticalMultipoint,
             float randomizationPercent, boolean useBackup, double range,
             boolean allowThroughBlocks, boolean allowThroughEntities) {
@@ -229,16 +259,16 @@ final class RavenRotationUtils {
                 useBackup, range, allowThroughBlocks, allowThroughEntities);
     }
 
-    static float[] getRotationsToTargetTw(Object entity, int hSpeed, int vSpeed, boolean advanced,
+    static float[] getRotationsToTargetTw(Entity entity, int hSpeed, int vSpeed, boolean advanced,
             double horizontalMultipoint, double verticalMultipoint,
             float randomizationPercent, boolean useBackup, double range,
             boolean allowThroughBlocks, boolean allowThroughEntities) {
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null || entity == null)
             return null;
 
-        float baseYaw = McAccess.getFloat(player, "field_70177_z");
-        float basePitch = McAccess.getFloat(player, "field_70125_A");
+        float baseYaw = player.rotationYaw;
+        float basePitch = player.rotationPitch;
         float[] target = useBackup
                 ? getRotationsWithBackup(entity, horizontalMultipoint, verticalMultipoint,
                         baseYaw, basePitch, range, allowThroughBlocks, allowThroughEntities)
@@ -250,23 +280,22 @@ final class RavenRotationUtils {
         return smoothRotationHv(baseYaw, basePitch, target[0], target[1], hSpeed, vSpeed, randomizationPercent);
     }
 
-    /** Raw unsmoothed rotation to entity aim point — no speed, no randomization, no smoothing. */
-    static float[] getRawRotationsToTarget(Object entity,
+    static float[] getRawRotationsToTarget(Entity entity,
             double horizontalMultipoint, double verticalMultipoint,
             boolean useBackup, double range,
             boolean allowThroughBlocks, boolean allowThroughEntities) {
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null || entity == null)
             return null;
-        float baseYaw = McAccess.getFloat(player, "field_70177_z");
-        float basePitch = McAccess.getFloat(player, "field_70125_A");
+        float baseYaw = player.rotationYaw;
+        float basePitch = player.rotationPitch;
         return useBackup
                 ? getRotationsWithBackup(entity, horizontalMultipoint, verticalMultipoint,
                         baseYaw, basePitch, range, allowThroughBlocks, allowThroughEntities)
                 : getRotations(entity, horizontalMultipoint, verticalMultipoint, baseYaw, basePitch);
     }
 
-    static float[] getRotations(Object entity, double horizontalMultipoint, double verticalMultipoint,
+    static float[] getRotations(Entity entity, double horizontalMultipoint, double verticalMultipoint,
             float baseYaw, float basePitch) {
         double[] aim = getAimPoint(entity, horizontalMultipoint, verticalMultipoint);
         if (aim == null)
@@ -275,13 +304,13 @@ final class RavenRotationUtils {
     }
 
     static float[] getRotationsToPoint(double x, double y, double z, float baseYaw, float basePitch) {
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null)
             return null;
 
-        double deltaX = x - McAccess.entityPosX(player);
-        double deltaZ = z - McAccess.entityPosZ(player);
-        double deltaY = y - (McAccess.entityPosY(player) + eyeHeight(player));
+        double deltaX = x - player.posX;
+        double deltaZ = z - player.posZ;
+        double deltaY = y - (player.posY + eyeHeight(player));
         double horizDistSq = deltaX * deltaX + deltaZ * deltaZ;
 
         float yaw;
@@ -300,22 +329,15 @@ final class RavenRotationUtils {
         return new float[] { yaw, clampPitch(pitch) };
     }
 
-    static double[] getAimPoint(Object entity, double horizontalMultipoint, double verticalMultipoint) {
-        Object player = McAccess.thePlayer();
-        Object bb = expandedBox(entity);
+    static double[] getAimPoint(Entity entity, double horizontalMultipoint, double verticalMultipoint) {
+        EntityPlayerSP player = Mc.player();
+        AxisAlignedBB bb = expandedBox(entity);
         if (player == null || bb == null)
             return null;
 
-        double minX = McAccess.getDouble(bb, "field_72340_a");
-        double minY = McAccess.getDouble(bb, "field_72338_b");
-        double maxY = McAccess.getDouble(bb, "field_72337_e");
-        double minZ = McAccess.getDouble(bb, "field_72339_c");
-        double maxX = McAccess.getDouble(bb, "field_72336_d");
-        double maxZ = McAccess.getDouble(bb, "field_72334_f");
-
-        double centerX = (minX + maxX) * 0.5;
-        double centerY = McAccess.entityPosY(entity) + eyeHeight(entity);
-        double centerZ = (minZ + maxZ) * 0.5;
+        double centerX = (bb.minX + bb.maxX) * 0.5;
+        double centerY = entity.posY + eyeHeight(entity);
+        double centerZ = (bb.minZ + bb.maxZ) * 0.5;
 
         double[] eye = eyePos(player, 1.0f);
         if (eye == null)
@@ -334,12 +356,12 @@ final class RavenRotationUtils {
         };
     }
 
-    static boolean hasValidAimPoint(Object entity, double hMult, double vMult, double range,
+    static boolean hasValidAimPoint(Entity entity, double hMult, double vMult, double range,
             boolean allowThroughBlocks, boolean allowThroughEntities) {
         double[] main = getAimPoint(entity, hMult, vMult);
         if (main == null)
             return false;
-        double[] eye = eyePos(McAccess.thePlayer(), 1.0f);
+        double[] eye = eyePos(Mc.player(), 1.0f);
         if (eye == null)
             return false;
         double dx = main[0] - eye[0];
@@ -350,20 +372,20 @@ final class RavenRotationUtils {
         return canAimAtPoint(eye, main, entity, range, allowThroughBlocks, allowThroughEntities);
     }
 
-    static float[] getRotationsWithBackup(Object entity, double horizontalMultipoint, double verticalMultipoint,
+    static float[] getRotationsWithBackup(Entity entity, double horizontalMultipoint, double verticalMultipoint,
             float baseYaw, float basePitch, double range,
             boolean allowThroughBlocks, boolean allowThroughEntities) {
         double[] main = getAimPoint(entity, horizontalMultipoint, verticalMultipoint);
         if (main == null)
             return null;
-        double[] eye = eyePos(McAccess.thePlayer(), 1.0f);
-        Object bb = expandedBox(entity);
+        double[] eye = eyePos(Mc.player(), 1.0f);
+        AxisAlignedBB bb = expandedBox(entity);
         if (eye == null || bb == null)
             return null;
 
         if (isVecInside(bb, eye[0], eye[1], eye[2])) {
-            double centerX = (McAccess.getDouble(bb, "field_72340_a") + McAccess.getDouble(bb, "field_72336_d")) * 0.5;
-            double centerZ = (McAccess.getDouble(bb, "field_72339_c") + McAccess.getDouble(bb, "field_72334_f")) * 0.5;
+            double centerX = (bb.minX + bb.maxX) * 0.5;
+            double centerZ = (bb.minZ + bb.maxZ) * 0.5;
             return getRotationsToPoint(centerX, eye[1], centerZ, baseYaw, basePitch);
         }
 
@@ -373,7 +395,7 @@ final class RavenRotationUtils {
         return getRotations(entity, horizontalMultipoint, verticalMultipoint, baseYaw, basePitch);
     }
 
-    private static boolean canAimAtPoint(double[] eye, double[] point, Object target, double range,
+    private static boolean canAimAtPoint(double[] eye, double[] point, Entity target, double range,
             boolean allowThroughBlocks, boolean allowThroughEntities) {
         double dx = point[0] - eye[0];
         double dy = point[1] - eye[1];
@@ -384,40 +406,32 @@ final class RavenRotationUtils {
 
         if (!allowThroughBlocks && blockBetween(eye, point))
             return false;
-        // Entity-occlusion check is intentionally a no-op (was incorrectly
-        // re-running blockBetween and doubling raytraces every validation).
         return true;
     }
 
     private static boolean blockBetween(double[] eye, double[] point) {
-        Object world = McAccess.theWorld();
+        World world = Mc.world();
         if (world == null)
             return false;
-        Object start = vec3(eye[0], eye[1], eye[2]);
-        Object end = vec3(point[0], point[1], point[2]);
-        if (start == null || end == null)
-            return false;
-        Class<?> vec3 = McAccess.gameClass("net.minecraft.util.Vec3");
-        Object hit = McAccess.invoke(world, "func_72933_a", new Class<?>[] { vec3, vec3 }, start, end);
+        Vec3 start = new Vec3(eye[0], eye[1], eye[2]);
+        Vec3 end = new Vec3(point[0], point[1], point[2]);
+        MovingObjectPosition hit = world.rayTraceBlocks(start, end);
         return hit != null;
     }
 
-    private static Object expandedBox(Object entity) {
+    private static AxisAlignedBB expandedBox(Entity entity) {
         if (entity == null)
             return null;
-        Object box = McAccess.getEntityBoundingBox(entity);
+        AxisAlignedBB box = entity.getEntityBoundingBox();
         if (box == null)
             return null;
-        Object border = McAccess.invoke(entity, "func_70111_Y", new Class<?>[0]);
-        float b = border instanceof Float ? (Float) border : 0.0f;
-        if (b <= 0.0f)
+        float border = entity.getCollisionBorderSize();
+        if (border <= 0.0f)
             return box;
-        return McAccess.invoke(box, "func_72314_b",
-                new Class<?>[] { double.class, double.class, double.class },
-                (double) b, (double) b, (double) b);
+        return box.expand(border, border, border);
     }
 
-    private static double[] eyePos(Object player, float partialTicks) {
+    private static double[] eyePos(Entity player, float partialTicks) {
         if (player == null)
             return null;
         if (partialTicks == 1.0f && player == eyeCachePlayer && eyeCache != null)
@@ -425,48 +439,27 @@ final class RavenRotationUtils {
         return eyePosUncached(player, partialTicks);
     }
 
-    private static double[] eyePosUncached(Object player, float partialTicks) {
-        Object vec = McAccess.invoke(player, "func_174824_e", new Class<?>[] { float.class }, partialTicks);
+    private static double[] eyePosUncached(Entity player, float partialTicks) {
+        Vec3 vec = player.getPositionEyes(partialTicks);
         if (vec == null)
             return null;
+        return new double[] { vec.xCoord, vec.yCoord, vec.zCoord };
+    }
+
+    private static float eyeHeight(Entity entity) {
+        return entity != null ? entity.getEyeHeight() : 1.62f;
+    }
+
+    private static double[] closestPointOnAabb(double x, double y, double z, AxisAlignedBB aabb) {
         return new double[] {
-                McAccess.getDouble(vec, "field_72450_a"),
-                McAccess.getDouble(vec, "field_72448_b"),
-                McAccess.getDouble(vec, "field_72449_c")
+                clamp(x, aabb.minX, aabb.maxX),
+                clamp(y, aabb.minY, aabb.maxY),
+                clamp(z, aabb.minZ, aabb.maxZ)
         };
     }
 
-    private static float eyeHeight(Object entity) {
-        Object h = McAccess.invoke(entity, "func_70047_e", new Class<?>[0]);
-        return h instanceof Float ? (Float) h : 1.62f;
-    }
-
-    private static double[] closestPointOnAabb(double x, double y, double z, Object aabb) {
-        double minX = McAccess.getDouble(aabb, "field_72340_a");
-        double minY = McAccess.getDouble(aabb, "field_72338_b");
-        double minZ = McAccess.getDouble(aabb, "field_72339_c");
-        double maxX = McAccess.getDouble(aabb, "field_72336_d");
-        double maxY = McAccess.getDouble(aabb, "field_72337_e");
-        double maxZ = McAccess.getDouble(aabb, "field_72334_f");
-        return new double[] {
-                clamp(x, minX, maxX),
-                clamp(y, minY, maxY),
-                clamp(z, minZ, maxZ)
-        };
-    }
-
-    private static boolean isVecInside(Object aabb, double x, double y, double z) {
-        Object vec = vec3(x, y, z);
-        if (vec == null || aabb == null)
-            return false;
-        Object r = McAccess.invoke(aabb, "func_72316_a",
-                new Class<?>[] { McAccess.gameClass("net.minecraft.util.Vec3") }, vec);
-        return r instanceof Boolean && (Boolean) r;
-    }
-
-    private static Object vec3(double x, double y, double z) {
-        return McAccess.newInstance("net.minecraft.util.Vec3",
-                new Class<?>[] { double.class, double.class, double.class }, x, y, z);
+    private static boolean isVecInside(AxisAlignedBB aabb, double x, double y, double z) {
+        return aabb != null && aabb.isVecInside(new Vec3(x, y, z));
     }
 
     private static double clamp(double v, double lo, double hi) {

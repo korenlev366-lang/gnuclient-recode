@@ -3,7 +3,7 @@ package gnu.client.runtime;
 import gnu.client.GnuClientMod;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import org.lwjgl.input.Keyboard;
 import org.lwjgl.input.Mouse;
 
@@ -57,7 +57,7 @@ public final class ClientBootstrap {
 
     /**
      * Queue a synthetic left-click for the next client tick, consumed by
-     * {@link McAccess#pressAttackKeyOnce()}. {@code holdMs} is ignored (no
+     * {@link Mc#pressAttackKeyOnce()}. {@code holdMs} is ignored (no
      * OS-level press/release — Forge has no physical key state to hold).
      */
     public static void queueAttackClick(int holdMs) {
@@ -67,18 +67,23 @@ public final class ClientBootstrap {
     /** Drain queued AutoClicker attacks on the Minecraft client thread. */
     public static void drainPendingAttackClicks() {
         int n = PENDING_ATTACK_CLICKS.getAndSet(0);
-        if (n <= 0 || !McAccess.isInGame())
+        if (n <= 0 || !Mc.isInGame())
             return;
         // Cap burst if the worker got ahead of ticks.
         if (n > 4)
             n = 4;
         for (int i = 0; i < n; i++) {
-            McAccess.pressAttackKeyOnce();
+            Mc.pressAttackKeyOnce();
         }
     }
 
     public static boolean isRebindActive() {
         return rebindModule != null;
+    }
+
+    /** Module name currently waiting for a key, or {@code null}. */
+    public static String rebindModuleName() {
+        return rebindModule;
     }
 
     public static void beginRebind(String moduleName) {
@@ -99,12 +104,27 @@ public final class ClientBootstrap {
     public static void handleRebindKeyboard() {
         if (rebindModule == null)
             return;
-        for (int i = 0; i < 256; i++) {
+        if (Keyboard.isKeyDown(Keyboard.KEY_ESCAPE)) {
+            rebindModule = null;
+            return;
+        }
+        if (Keyboard.isKeyDown(Keyboard.KEY_DELETE) || Keyboard.isKeyDown(Keyboard.KEY_BACK)) {
+            Module clear = ModuleManager.INSTANCE.getModule(rebindModule);
+            if (clear != null)
+                clear.setKeyCode(-1);
+            rebindModule = null;
+            return;
+        }
+        // Skip modifiers so Shift+letter rebinds don't latch on Shift alone.
+        for (int i = 1; i < Keyboard.KEYBOARD_SIZE; i++) {
+            if (i == Keyboard.KEY_LSHIFT || i == Keyboard.KEY_RSHIFT
+                    || i == Keyboard.KEY_LCONTROL || i == Keyboard.KEY_RCONTROL
+                    || i == Keyboard.KEY_LMENU || i == Keyboard.KEY_RMENU)
+                continue;
             if (Keyboard.isKeyDown(i)) {
-                Module m = ModuleManager.INSTANCE.get(rebindModule);
-                if (m != null) {
+                Module m = ModuleManager.INSTANCE.getModule(rebindModule);
+                if (m != null)
                     m.setKeyCode(i);
-                }
                 rebindModule = null;
                 return;
             }

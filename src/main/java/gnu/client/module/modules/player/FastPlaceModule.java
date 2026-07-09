@@ -2,7 +2,10 @@ package gnu.client.module.modules.player;
 
 import gnu.client.module.Category;
 import gnu.client.module.Module;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.item.ItemBlock;
+import net.minecraft.item.ItemStack;
 
 /**
  * Removes Minecraft's right-click placement delay, but only when
@@ -10,11 +13,6 @@ import gnu.client.runtime.mc.McAccess;
  * (food, potions, bows, tools, etc.) keep vanilla delay.
  *
  * Ported from RainClient {@code FastPlace} — modified to be block-only.
- *
- * SRG (1.8.9):
- *   rightClickDelayTimer = field_71467_ac (Minecraft)
- *   EntityPlayer.getHeldItem() = func_70694_bm
- *   ItemStack.getItem() = func_77973_b
  */
 public final class FastPlaceModule extends Module {
 
@@ -30,40 +28,21 @@ public final class FastPlaceModule extends Module {
 
     @Override
     public void onTick() {
-        Object mc = McAccess.minecraft();
-        if (mc == null)
-            return;
-
-        // Only clear delay if holding a block (ItemBlock)
         if (!holdingBlock())
             return;
 
-        McAccess.setInt(mc, "field_71467_ac", 0);
+        Mc.clearRightClickDelay();
     }
 
-    /**
-     * Check whether the player's currently held item is a block
-     * (instance of net.minecraft.item.ItemBlock).
-     *
-     * Uses the same reflection pattern as AimAssistModule.holdingWeapon().
-     */
     private static boolean holdingBlock() {
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null)
             return false;
 
-        // Get held ItemStack
-        Object stack = McAccess.invoke(player, "func_70694_bm", new Class<?>[0]);
+        ItemStack stack = player.getHeldItem();
         if (stack == null)
             return false;
 
-        // Get Item from ItemStack
-        Object item = McAccess.invoke(stack, "func_77973_b", new Class<?>[0]);
-        if (item == null)
-            return false;
-
-        // Check instanceof ItemBlock
-        Class<?> itemBlock = McAccess.gameClass("net.minecraft.item.ItemBlock");
-        return itemBlock != null && itemBlock.isInstance(item);
+        return stack.getItem() instanceof ItemBlock;
     }
 }

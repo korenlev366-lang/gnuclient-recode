@@ -5,11 +5,18 @@ import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.OutboundLagQueue;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketUtil;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.multiplayer.WorldClient;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.item.ItemSword;
+import net.minecraft.scoreboard.Team;
+import net.minecraft.util.MovingObjectPosition;
 import java.util.function.Consumer;
 
 /**
@@ -17,8 +24,8 @@ import java.util.function.Consumer;
  * valid target is in range while LMB is held. Ported from raven-bS
  * {@code Autoblock}.
  *
- * <p>Blocking uses keybind approach with {@link McAccess#pressUseItemKeyOnce}:
- * both {@link McAccess#setUseItemKeyState}(true) and
+ * <p>Blocking uses keybind approach with {@link Mc#pressUseItemKeyOnce}:
+ * both {@link Mc#setUseItemKeyState}(true) and
  * {@code pressUseItemKeyOnce()} are called. The latter is required because
  * the game's {@code rightClickMouse()} path checks {@code isPressed()},
  * which requires {@code pressTime > 0} from {@code onTick}. Without it,
@@ -46,7 +53,7 @@ import java.util.function.Consumer;
  * buffered C07 before C02 reaches the server.
  *
  * <p>Anti-MultiActions: When C02 attack fires (during lag or not), the module
- * sends C07 RELEASE_USE_ITEM via {@link McAccess#sendReleaseUseItem} before
+ * sends C07 RELEASE_USE_ITEM via server-side item-use clear before
  * letting C02 pass through. This clears the server-side isUsingItem state,
  * preventing Grim MultiActionsA (attack_while_using) and MultiActionsE
  * (swing_while_using) flags. The C07 is only sent on actual attack packets,
@@ -102,7 +109,7 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
     private int blockStartedModuleTick = -1;
     private int lastSelfHurtTime;
     // Current target (nearest valid player in range)
-    private Object currentTarget;
+    private Entity currentTarget;
 
     // Lag state (OutboundLagQueue-based: buffers non-attack packets during lag window).
     private final OutboundLagQueue outbound = new OutboundLagQueue();
@@ -161,14 +168,14 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
         attackedLastTick = attackedThisTick;
         attackedThisTick = false;
 
-        Object player = McAccess.thePlayer();
-        Object world = McAccess.theWorld();
-        if (player == null || world == null || McAccess.currentScreen() != null) {
+        EntityPlayerSP player = Mc.player();
+        WorldClient world = Mc.world();
+        if (player == null || world == null || Mc.currentScreen() != null) {
             resetState(true);
             return;
         }
 
-        int selfHurtTime = McAccess.getInt(player, "field_70737_aN");
+        int selfHurtTime = player.hurtTime;
         boolean hurtAgain = selfHurtTime > lastSelfHurtTime;
         lastSelfHurtTime = selfHurtTime;
 
@@ -185,8 +192,8 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
         // AutoClicker / KillAura count as LMB held (raven-bS parity).
         boolean clickSourceActive = isClickSourceActive();
         boolean killAuraAttacking = isKillAuraAttacking(currentTarget);
-        boolean rmbDown = McAccess.isPhysicalRmbDown();
-        boolean lmbDown = McAccess.isPhysicalLmbDown() || clickSourceActive || killAuraAttacking;
+        boolean rmbDown = Mc.isPhysicalRmbDown();
+        boolean lmbDown = Mc.isPhysicalLmbDown() || clickSourceActive || killAuraAttacking;
 
         // ── Raven-bS flow ─────────────────────────────────────────────────
         if (!rmbDown && requireRmb.getValue()) {
@@ -272,7 +279,7 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
     // cleared activeItemStack), this restores it between runTick() and
     // renderWorld(), so the hand renders as blocking on the current frame.
     //
-    // Uses McAccess.setItemInUse() which mirrors Raven's mixin-based approach:
+    // Uses Mc.setItemInUse() which mirrors Raven's mixin-based approach:
     // Raven redirects getItemInUseCount() during ItemRenderer.renderItemInFirstPerson
     // via @Redirect — purely visual. Since we can't add a mixin trivially, we
     // set the player's fields at tick-end instead. This is logically equivalent
@@ -284,7 +291,7 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
         // Mirror Raven's onRenderTick: setItemInUse(isBlocking || isLagging)
         // This ensures the block animation is forced when we're blocking/lagging
         // AND properly cleared when we're not (matching vanilla game state).
-        McAccess.setItemInUse(McAccess.thePlayer(), isBlocking || isLagging);
+        Mc.setItemInUse(Mc.player(), isBlocking || isLagging);
     }
 
     // ── PacketListener ──────────────────────────────────────────────────
@@ -430,45 +437,38 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
 
     // ── Target finding ────────────────────────────────────────────────────
 
-    private Object findTarget(Object player, Object world) {
-        Class<?> playerCls = McAccess.gameClass("net.minecraft.entity.player.EntityPlayer");
-        if (playerCls == null)
-            return null;
-
+    private Entity findTarget(EntityPlayerSP player, WorldClient world) {
         double rangeSq = range.getValue() * range.getValue();
 
-        Object killAuraTarget = KillAuraModule.getCurrentTarget();
+        Entity killAuraTarget = KillAuraModule.getCurrentTarget();
         if (killAuraTarget != null && isValidTarget(killAuraTarget, player, rangeSq))
             return killAuraTarget;
 
-        // 1. Check mouse-over target first (raven-bS priority)
-        Object mop = McAccess.objectMouseOver();
+        MovingObjectPosition mop = Mc.objectMouseOver();
         if (mop != null) {
-            Object hitEntity = McAccess.invoke(mop, "func_78288_c", new Class<?>[0]); // entityHit
-            if (hitEntity != null && playerCls.isInstance(hitEntity)
+            Entity hitEntity = mop.entityHit;
+            if (hitEntity instanceof EntityPlayer
                     && isValidTarget(hitEntity, player, rangeSq)) {
                 return hitEntity;
             }
         }
 
-        // 2. Fall back to closest
-        return findClosestTarget(player, world, playerCls, rangeSq);
+        return findClosestTarget(player, world, rangeSq);
     }
 
-    private Object findClosestTarget(Object player, Object world,
-                                     Class<?> playerCls, double rangeSq) {
-        Object best = null;
+    private Entity findClosestTarget(EntityPlayerSP player, WorldClient world, double rangeSq) {
+        Entity best = null;
         double bestDist = rangeSq;
 
-        for (Object entity : McAccess.getWorldEntities(world)) {
-            if (entity == null || !playerCls.isInstance(entity))
+        for (Entity entity : Mc.getWorldEntities(world)) {
+            if (entity == null || !(entity instanceof EntityPlayer))
                 continue;
             if (!isValidTarget(entity, player, rangeSq))
                 continue;
 
-            double dx = McAccess.entityPosX(entity) - McAccess.entityPosX(player);
-            double dy = McAccess.entityPosY(entity) - McAccess.entityPosY(player);
-            double dz = McAccess.entityPosZ(entity) - McAccess.entityPosZ(player);
+            double dx = entity.posX - player.posX;
+            double dy = entity.posY - player.posY;
+            double dz = entity.posZ - player.posZ;
             double distSq = dx * dx + dy * dy + dz * dz;
 
             if (distSq < bestDist) {
@@ -480,17 +480,17 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
         return best;
     }
 
-    private boolean isValidTarget(Object entity, Object player, double rangeSq) {
+    private boolean isValidTarget(Entity entity, EntityPlayerSP player, double rangeSq) {
         if (entity == player)
             return false;
-        if (McAccess.getBool(entity, "field_70128_L"))
-            return false; // isDead
+        if (entity.isDead)
+            return false;
         if (ignoreTeammates.getValue() && isTeammate(entity))
             return false;
 
-        double dx = McAccess.entityPosX(entity) - McAccess.entityPosX(player);
-        double dy = McAccess.entityPosY(entity) - McAccess.entityPosY(player);
-        double dz = McAccess.entityPosZ(entity) - McAccess.entityPosZ(player);
+        double dx = entity.posX - player.posX;
+        double dy = entity.posY - player.posY;
+        double dz = entity.posZ - player.posZ;
         return dx * dx + dy * dy + dz * dz <= rangeSq;
     }
 
@@ -501,18 +501,19 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
      * Recomputes target + input — safe to call from onSend mid-tick.
      */
     private boolean canStartBlock() {
-        Object player = McAccess.thePlayer();
-        Object world = McAccess.theWorld();
-        if (player == null || world == null || McAccess.currentScreen() != null)
+        EntityPlayerSP player = Mc.player();
+        WorldClient world = Mc.world();
+        if (player == null || world == null || Mc.currentScreen() != null)
             return false;
         if (!isHoldingSword())
             return false;
         if (findTarget(player, world) == null)
             return false;
         boolean clickSourceActive = isClickSourceActive();
-        boolean killAuraAttacking = isKillAuraAttacking(findTarget(player, world));
-        boolean rmbDown = McAccess.isPhysicalRmbDown();
-        boolean lmbDown = McAccess.isPhysicalLmbDown() || clickSourceActive || killAuraAttacking;
+        Entity target = findTarget(player, world);
+        boolean killAuraAttacking = isKillAuraAttacking(target);
+        boolean rmbDown = Mc.isPhysicalRmbDown();
+        boolean lmbDown = Mc.isPhysicalLmbDown() || clickSourceActive || killAuraAttacking;
         if (requireRmb.getValue() && !rmbDown)
             return false;
         if (!lmbDown)
@@ -531,9 +532,9 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
     }
 
     private boolean shouldPredictiveBlock() {
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null) return false;
-        int selfHurtTime = McAccess.getInt(player, "field_70737_aN");
+        int selfHurtTime = player.hurtTime;
         int triggerTick = (int) Math.round(maxHurtTimeMs.getValue() / 50.0);
         triggerTick = Math.max(1, Math.min(10, triggerTick));
         return selfHurtTime == triggerTick;
@@ -545,7 +546,7 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
     }
 
     /** Raven-bS: KillAura enabled with a target counts as LMB for require-LMB. */
-    private static boolean isKillAuraAttacking(Object target) {
+    private static boolean isKillAuraAttacking(Entity target) {
         if (target == null)
             return false;
         Module killAura = ModuleManager.INSTANCE.getModule("KillAura");
@@ -563,18 +564,16 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
         // isBlocking=true. The game re-establishes state later in the tick via
         // rightClickMouse(), but that's fragile. clearBlockHitTimer zeros the
         // 5-tick blockHitDelay so sendUseItem won't silently drop C08 after attack.
-        McAccess.clearBlockHitTimer();
-        // Raven-bS keybind-only: setKeyBindState + onTick → rightClickMouse()
-        // later this tick sends exactly one C08. No explicit sendUseItem().
-        McAccess.setUseItemKeyState(true);
-        McAccess.pressUseItemKeyOnce();
+        Mc.clearBlockHitDelay();
+        Mc.setUseItemKeyState(true);
+        Mc.pressUseItemKeyOnce();
         isBlocking = true;
         blockStartTick = currentTick;
     }
 
     private void stopBlocking(boolean forceRelease) {
         if (!isBlocking && !forceRelease) return;
-        McAccess.setUseItemKeyState(false);
+        Mc.setUseItemKeyState(false);
         isBlocking = false;
         blockStartTick = -1;
     }
@@ -625,7 +624,7 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
     }
 
     /** Called before attack packets — bookkeeping only. Lag drains on C02 {@link #onSend}. */
-    public void noteAttack(Object target) {
+    public void noteAttack(Entity target) {
         if (!isEnabled() || target == null)
             return;
         this.attackedThisTick = true;
@@ -647,9 +646,9 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
         // updateEntityActionState() fires stopUsingItem() which sends C07
         // naturally in the correct packet context, next tick.
         // Raven-bS: if RMB is still physically held, re-press the use-item key
-        if (releaseUseKey && McAccess.isPhysicalRmbDown()
-                && McAccess.currentScreen() == null && isHoldingSword()) {
-            McAccess.setUseItemKeyState(true);
+        if (releaseUseKey && Mc.isPhysicalRmbDown()
+                && Mc.currentScreen() == null && isHoldingSword()) {
+            Mc.setUseItemKeyState(true);
         }
         currentTarget = null;
         lastSelfHurtTime = 0;
@@ -658,28 +657,19 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
     // ── Utility ───────────────────────────────────────────────────────────
 
     private static boolean isHoldingSword() {
-        Object player = McAccess.thePlayer();
-        if (player == null) return false;
-        Object stack = McAccess.invoke(player, "func_70694_bm", new Class<?>[0]);
-        if (stack == null) return false;
-        Object item = McAccess.invoke(stack, "func_77973_b", new Class<?>[0]);
-        if (item == null) return false;
-        Class<?> sword = McAccess.gameClass("net.minecraft.item.ItemSword");
-        return sword != null && sword.isInstance(item);
+        return Mc.isHoldingSword();
     }
 
-    private static boolean isTeammate(Object entity) {
-        Object player = McAccess.thePlayer();
-        if (player == null || entity == null) return false;
+    private static boolean isTeammate(Entity entity) {
+        EntityPlayerSP player = Mc.player();
+        if (player == null || entity == null || !(entity instanceof EntityPlayer))
+            return false;
         try {
-            Object team = McAccess.invoke(entity, "func_96124_cp", new Class<?>[0]);
+            Team team = ((EntityPlayer) entity).getTeam();
             if (team != null) {
-                Object ourTeam = McAccess.invoke(player, "func_96124_cp", new Class<?>[0]);
-                if (ourTeam != null) {
-                    Object teamName = McAccess.invoke(team, "func_96661_b", new Class<?>[0]);
-                    Object ourName = McAccess.invoke(ourTeam, "func_96661_b", new Class<?>[0]);
-                    return teamName != null && ourName != null && teamName.equals(ourName);
-                }
+                Team ourTeam = player.getTeam();
+                if (ourTeam != null)
+                    return team.getRegisteredName().equals(ourTeam.getRegisteredName());
             }
         } catch (Throwable ignored) {
         }

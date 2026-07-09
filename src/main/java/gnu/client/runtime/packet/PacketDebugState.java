@@ -1,7 +1,6 @@
 package gnu.client.runtime.packet;
 
 import gnu.client.common.GnuLog;
-import gnu.client.runtime.mc.McAccess;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,13 +37,12 @@ public final class PacketDebugState {
         if (!PacketHelper.isPlayerMovement(packet))
             return;
 
-        boolean hasPos = movementHasPosition(packet);
-        if (!hasPos)
+        if (!PacketHelper.c03HasPosition(packet))
             return;
 
-        selfX = packetX(packet);
-        selfY = packetY(packet);
-        selfZ = packetZ(packet);
+        selfX = PacketHelper.c03PosX(packet);
+        selfY = PacketHelper.c03PosY(packet);
+        selfZ = PacketHelper.c03PosZ(packet);
         selfValid = true;
         GnuLog.log("PKT_DEBUG self C03 captured x=" + selfX + " y=" + selfY + " z=" + selfZ);
     }
@@ -98,35 +96,5 @@ public final class PacketDebugState {
 
     public static Vec3 targetReal(int entityId) {
         return TARGET_REAL.get(entityId);
-    }
-
-    private static boolean movementHasPosition(Object packet) {
-        Object moving = McAccess.invoke(packet, "func_149466_j", new Class<?>[0]);
-        if (!(moving instanceof Boolean))
-            moving = McAccess.invokeNamed(packet, "isMoving", new Class<?>[0]);
-        if (moving instanceof Boolean)
-            return (Boolean) moving;
-        return true;
-    }
-
-    private static double packetX(Object packet) {
-        Object value = McAccess.invoke(packet, "func_149464_c", new Class<?>[0]);
-        if (!(value instanceof Number))
-            value = McAccess.invokeNamed(packet, "getPositionX", new Class<?>[0]);
-        return value instanceof Number ? ((Number) value).doubleValue() : 0.0;
-    }
-
-    private static double packetY(Object packet) {
-        Object value = McAccess.invoke(packet, "func_149467_d", new Class<?>[0]);
-        if (!(value instanceof Number))
-            value = McAccess.invokeNamed(packet, "getPositionY", new Class<?>[0]);
-        return value instanceof Number ? ((Number) value).doubleValue() : 0.0;
-    }
-
-    private static double packetZ(Object packet) {
-        Object value = McAccess.invoke(packet, "func_149472_e", new Class<?>[0]);
-        if (!(value instanceof Number))
-            value = McAccess.invokeNamed(packet, "getPositionZ", new Class<?>[0]);
-        return value instanceof Number ? ((Number) value).doubleValue() : 0.0;
     }
 }

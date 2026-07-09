@@ -1,17 +1,28 @@
 package gnu.client.module.modules.player;
 
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.utility.BlockUtils;
+import gnu.client.utility.IMinecraftInstance;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockSnow;
+import net.minecraft.client.Minecraft;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.util.BlockPos;
+import net.minecraft.util.EnumFacing;
+import net.minecraft.util.MathHelper;
+import net.minecraft.util.MovingObjectPosition;
+import net.minecraft.util.Vec3;
+import net.minecraft.world.World;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
 /**
- * OpenMyau-style scaffold placement helpers, adapted to reflection-only 1.8.9.
+ * OpenMyau-style scaffold placement — direct Forge MCP APIs (not McAccess reflection).
+ * Reflection raycasts were freezing the client (~256×/tick).
  */
-final class ScaffoldPlacement {
+final class ScaffoldPlacement implements IMinecraftInstance {
 
-  // EnumFacing ordinals (1.8.9): 0=DOWN, 1=UP, 2=NORTH, 3=SOUTH, 4=WEST, 5=EAST
   static final int FACE_DOWN = 0;
   static final int FACE_UP = 1;
   static final int FACE_NORTH = 2;
@@ -19,33 +30,43 @@ final class ScaffoldPlacement {
   static final int FACE_WEST = 4;
   static final int FACE_EAST = 5;
 
-  private static final int[] PLACE_FACES = {FACE_UP, FACE_NORTH, FACE_SOUTH, FACE_WEST, FACE_EAST};
+  private static final EnumFacing[] PLACE_FACES = {
+      EnumFacing.UP, EnumFacing.NORTH, EnumFacing.SOUTH, EnumFacing.WEST, EnumFacing.EAST
+  };
+
+  /** Coarser than OpenMyau's 16-step grid — enough for Grim, far fewer raycasts. */
   private static final double[] PLACE_OFFSETS = {
-      0.03125, 0.09375, 0.15625, 0.21875,
-      0.28125, 0.34375, 0.40625, 0.46875,
-      0.53125, 0.59375, 0.65625, 0.71875,
-      0.78125, 0.84375, 0.90625, 0.96875
+      0.0625, 0.1875, 0.3125, 0.4375,
+      0.5625, 0.6875, 0.8125, 0.9375
   };
 
   private ScaffoldPlacement() {}
 
   static final class BlockData {
-    final Object blockPos;
+    final BlockPos blockPos;
     final int faceOrdinal;
 
-    BlockData(Object blockPos, int faceOrdinal) {
+    BlockData(BlockPos blockPos, int faceOrdinal) {
       this.blockPos = blockPos;
       this.faceOrdinal = faceOrdinal;
+    }
+
+    BlockPos pos() {
+      return blockPos;
+    }
+
+    EnumFacing facing() {
+      return EnumFacing.values()[faceOrdinal];
     }
   }
 
   static final class AimData {
-    final Object hitVec;
+    final Vec3 hitVec;
     final float yaw;
     final float pitch;
     final boolean raytraceExact;
 
-    AimData(Object hitVec, float yaw, float pitch, boolean raytraceExact) {
+    AimData(Vec3 hitVec, float yaw, float pitch, boolean raytraceExact) {
       this.hitVec = hitVec;
       this.yaw = yaw;
       this.pitch = pitch;
@@ -53,36 +74,61 @@ final class ScaffoldPlacement {
     }
   }
 
-  static BlockData getBlockData(Object player, Object world, int startY, int stage, boolean shouldKeepY) {
+  private static Minecraft mc() {
+    return Minecraft.getMinecraft();
+  }
+
+  /** OpenMyau {@code BlockUtil.isReplaceable} — material.isReplaceable + snow height. */
+  static boolean isReplaceable(BlockPos pos) {
+    World world = mc().theWorld;
+    if (world == null || pos == null)
+      return false;
+    Block block = world.getBlockState(pos).getBlock();
+    if (!block.getMaterial().isReplaceable())
+      return false;
+    if (!(block instanceof BlockSnow))
+      return true;
+    return !(block.getBlockBoundsMaxY() > 0.125);
+  }
+
+  static boolean isInteractable(BlockPos pos) {
+    World world = mc().theWorld;
+    if (world == null || pos == null)
+      return false;
+    return BlockUtils.isInteractable(world.getBlockState(pos).getBlock());
+  }
+
+  static BlockData getBlockData(EntityPlayer player, World world, int startY, int stage, boolean shouldKeepY) {
     if (player == null || world == null)
       return null;
 
-    int playerY = floor(McAccess.entityPosY(player));
-    int targetX = floor(McAccess.entityPosX(player));
+    int playerY = MathHelper.floor_double(player.posY);
+    int targetX = MathHelper.floor_double(player.posX);
     int targetY = (stage != 0 && !shouldKeepY ? Math.min(playerY, startY) : playerY) - 1;
-    int targetZ = floor(McAccess.entityPosZ(player));
-    if (!McAccess.isReplaceable(world, targetX, targetY, targetZ))
+    int targetZ = MathHelper.floor_double(player.posZ);
+    BlockPos under = new BlockPos(targetX, targetY, targetZ);
+    if (!isReplaceable(under))
       return null;
 
     List<int[]> positions = new ArrayList<>();
-    double reach = McAccess.getBlockReachDistance();
+    double reach = mc().playerController.getBlockReachDistance();
     for (int x = -4; x <= 4; x++) {
       for (int y = -4; y <= 0; y++) {
         for (int z = -4; z <= 4; z++) {
           int bx = targetX + x;
           int by = targetY + y;
           int bz = targetZ + z;
-          if (McAccess.isReplaceable(world, bx, by, bz))
+          BlockPos pos = new BlockPos(bx, by, bz);
+          if (isReplaceable(pos))
             continue;
-          if (isInteractable(world, bx, by, bz))
+          if (isInteractable(pos))
             continue;
-          if (distanceTo(player, bx + 0.5, by + 0.5, bz + 0.5) > reach)
+          if (player.getDistance(bx + 0.5, by + 0.5, bz + 0.5) > reach)
             continue;
           if (stage != 0 && !shouldKeepY && by >= startY)
             continue;
-          for (int face : PLACE_FACES) {
-            int[] adj = offset(bx, by, bz, face);
-            if (McAccess.isReplaceable(world, adj[0], adj[1], adj[2])) {
+          for (EnumFacing face : PLACE_FACES) {
+            if (isReplaceable(pos.offset(face))) {
               positions.add(new int[] {bx, by, bz});
               break;
             }
@@ -93,28 +139,42 @@ final class ScaffoldPlacement {
 
     if (positions.isEmpty())
       return null;
-    positions.sort(Comparator.comparingDouble(pos ->
-        distSq(pos[0] + 0.5, pos[1] + 0.5, pos[2] + 0.5,
+    positions.sort(Comparator.comparingDouble(p ->
+        distSq(p[0] + 0.5, p[1] + 0.5, p[2] + 0.5,
             targetX + 0.5, targetY + 0.5, targetZ + 0.5)));
 
     int[] best = positions.get(0);
-    int face = bestFacing(best[0], best[1], best[2], targetX, targetY, targetZ);
-    Object pos = blockPos(best[0], best[1], best[2]);
-    return pos == null || face < 0 ? null : new BlockData(pos, face);
+    EnumFacing face = bestFacing(best[0], best[1], best[2], targetX, targetY, targetZ);
+    if (face == null)
+      return null;
+    return new BlockData(new BlockPos(best[0], best[1], best[2]), face.ordinal());
   }
 
   static AimData findAimData(BlockData data, float baseYaw, float basePitch) {
     if (data == null || data.blockPos == null)
       return null;
-    Object player = McAccess.thePlayer();
+    EntityPlayer player = mc().thePlayer;
     if (player == null)
       return null;
 
-    int bx = blockPosX(data.blockPos);
-    int by = blockPosY(data.blockPos);
-    int bz = blockPosZ(data.blockPos);
-    if (bx == Integer.MIN_VALUE)
-      return null;
+    BlockPos pos = data.pos();
+    double gcd = mouseGcd();
+    float reach = mc().playerController.getBlockReachDistance();
+
+    // Face-center first (1 raycast) — OpenMyau often lands here when bridging forward.
+    Vec3 center = getClickVec(pos, data.faceOrdinal);
+    if (center != null) {
+      float[] centerRots = rotationsTo(center, player, baseYaw, basePitch, gcd);
+      MovingObjectPosition centerMop = rayTrace(centerRots[0], centerRots[1], reach);
+      if (matchesFace(centerMop, pos, data.facing()))
+        return new AimData(centerMop.hitVec, centerRots[0], centerRots[1], true);
+      if (matchesBlock(centerMop, pos))
+        return new AimData(centerMop.hitVec, centerRots[0], centerRots[1], true);
+    }
+
+    int bx = pos.getX();
+    int by = pos.getY();
+    int bz = pos.getZ();
 
     double[] xs = PLACE_OFFSETS;
     double[] ys = PLACE_OFFSETS;
@@ -131,118 +191,115 @@ final class ScaffoldPlacement {
 
     AimData best = null;
     float bestDiff = Float.MAX_VALUE;
+    search:
     for (double dx : xs) {
       for (double dy : ys) {
         for (double dz : zs) {
-          Object vec = vec3(bx + dx, by + dy, bz + dz);
-          float[] rotations = rotationsTo(vec, player, baseYaw, basePitch);
-          float aimYaw = quantize(rotations[0]);
-          float aimPitch = quantize(clampPitch(rotations[1]));
-          Object hit = hitVecForRotation(data.blockPos, data.faceOrdinal, aimYaw, aimPitch);
-          if (hit == null)
+          Vec3 point = new Vec3(bx + dx, by + dy, bz + dz);
+          float[] rotations = rotationsTo(point, player, baseYaw, basePitch, gcd);
+          float aimYaw = rotations[0];
+          float aimPitch = rotations[1];
+          MovingObjectPosition mop = rayTrace(aimYaw, aimPitch, reach);
+          if (!matchesBlock(mop, pos))
             continue;
           float diff = Math.abs(wrapAngle(aimYaw - baseYaw)) + Math.abs(aimPitch - basePitch);
           if (best == null || diff < bestDiff) {
-            best = new AimData(hit, aimYaw, aimPitch, true);
+            best = new AimData(mop.hitVec, aimYaw, aimPitch, mop.sideHit == data.facing());
             bestDiff = diff;
+            if (bestDiff < 3.0f && mop.sideHit == data.facing())
+              break search;
           }
         }
       }
     }
-
     return best;
   }
 
-  /** Try several yaw bases — telly air often needs movement/camera yaw, not backwards preset. */
-  static AimData findAimData(BlockData data, Object player, float[] baseYaws, float basePitch) {
+  /** Face-center aim without requiring a successful raycast (OpenMyau getClickVec path). */
+  static AimData aimAtFaceCenter(BlockData data, float baseYaw, float basePitch) {
+    if (data == null || data.blockPos == null)
+      return null;
+    EntityPlayer player = mc().thePlayer;
+    if (player == null)
+      return null;
+    Vec3 center = getClickVec(data.blockPos, data.faceOrdinal);
+    if (center == null)
+      return null;
+    double gcd = mouseGcd();
+    float[] rots = rotationsTo(center, player, baseYaw, basePitch, gcd);
+    return new AimData(center, rots[0], rots[1], false);
+  }
+
+  static AimData findAimData(BlockData data, float[] baseYaws, float basePitch) {
     if (data == null || baseYaws == null)
       return null;
-    AimData best = null;
-    float bestDiff = Float.MAX_VALUE;
     for (float baseYaw : baseYaws) {
       AimData candidate = findAimData(data, baseYaw, basePitch);
-      if (candidate == null)
-        continue;
-      float diff = Math.abs(wrapAngle(candidate.yaw - baseYaw)) + Math.abs(candidate.pitch - basePitch);
-      if (best == null || diff < bestDiff) {
-        best = candidate;
-        bestDiff = diff;
-      }
+      if (candidate != null)
+        return candidate;
     }
-    return best;
+    return null;
   }
 
-  static Object hitVecForRotation(Object blockPos, int faceOrdinal, float yaw, float pitch) {
+  static Vec3 hitVecForRotation(BlockPos blockPos, int faceOrdinal, float yaw, float pitch) {
     if (blockPos == null)
       return null;
-    Object mop = McAccess.raycastBlocks(McAccess.getBlockReachDistance(), yaw, pitch);
-    if (!matchesRaycast(mop, blockPos, faceOrdinal))
+    MovingObjectPosition mop = rayTrace(yaw, pitch, mc().playerController.getBlockReachDistance());
+    if (!matchesFace(mop, blockPos, EnumFacing.values()[faceOrdinal]))
       return null;
-    return McAccess.getObject(mop, "field_72307_f");
+    return mop.hitVec;
   }
 
   /**
-   * Resolve a placement hit vec for the rotation actually sent this tick.
-   * Returns null when the look vector does not hit the planned block face — callers
-   * must skip placement instead of falling back to face-center (Grim RotationPlace).
+   * Packet-look hit only. Returns null when the look misses the support block —
+   * callers may fall back to aim hitVec / face-center (OpenMyau).
    */
-  static Object findPlacementHit(Object player, BlockData data, float yaw, float pitch) {
-    if (player == null || data == null)
+  static Vec3 findPlacementHit(EntityPlayer player, BlockData data, float yaw, float pitch) {
+    if (data == null || data.blockPos == null)
       return null;
-    return hitVecForRotation(data.blockPos, data.faceOrdinal, yaw, pitch);
+    MovingObjectPosition mop = rayTrace(yaw, pitch, mc().playerController.getBlockReachDistance());
+    if (matchesBlock(mop, data.pos()))
+      return mop.hitVec;
+    return null;
   }
 
-  /** Grim PositionPlace — eye must be on the correct side of the clicked face. */
-  static boolean isFaceVisible(Object player, Object blockPos, int faceOrdinal) {
+  /** True if look from yaw/pitch intersects the block (Grim RotationPlace gate). */
+  static boolean lookHitsBlock(float yaw, float pitch, BlockPos pos) {
+    MovingObjectPosition mop = rayTrace(yaw, pitch, mc().playerController.getBlockReachDistance());
+    return matchesBlock(mop, pos);
+  }
+
+  static boolean isFaceVisible(EntityPlayer player, BlockPos blockPos, int faceOrdinal) {
     if (player == null || blockPos == null)
       return false;
-    int bx = blockPosX(blockPos);
-    int by = blockPosY(blockPos);
-    int bz = blockPosZ(blockPos);
-    if (bx == Integer.MIN_VALUE)
-      return false;
-
-    double ex = McAccess.entityPosX(player);
-    double ey = McAccess.entityPosY(player) + eyeHeight(player);
-    double ez = McAccess.entityPosZ(player);
+    double ex = player.posX;
+    double ey = player.posY + player.getEyeHeight();
+    double ez = player.posZ;
     double margin = 0.03;
     switch (faceOrdinal) {
-      case FACE_NORTH: return ez < bz + margin;
-      case FACE_SOUTH: return ez > bz + 1.0 - margin;
-      case FACE_WEST: return ex < bx + margin;
-      case FACE_EAST: return ex > bx + 1.0 - margin;
-      case FACE_UP: return ey > by + 1.0 - margin;
-      case FACE_DOWN: return ey < by + margin;
+      case FACE_NORTH: return ez < blockPos.getZ() + margin;
+      case FACE_SOUTH: return ez > blockPos.getZ() + 1.0 - margin;
+      case FACE_WEST: return ex < blockPos.getX() + margin;
+      case FACE_EAST: return ex > blockPos.getX() + 1.0 - margin;
+      case FACE_UP: return ey > blockPos.getY() + 1.0 - margin;
+      case FACE_DOWN: return ey < blockPos.getY() + margin;
       default: return false;
     }
   }
 
-  /** Grim AirLiquidPlace — the cell receiving the new block must be replaceable. */
-  static boolean isPlacementTargetClear(Object world, Object blockPos, int faceOrdinal) {
-    if (world == null || blockPos == null)
+  static boolean isPlacementTargetClear(BlockPos blockPos, int faceOrdinal) {
+    if (blockPos == null)
       return false;
-    int x = blockPosX(blockPos);
-    int y = blockPosY(blockPos);
-    int z = blockPosZ(blockPos);
-    if (x == Integer.MIN_VALUE)
-      return false;
-    int[] dest = offset(x, y, z, faceOrdinal);
-    return McAccess.isReplaceable(world, dest[0], dest[1], dest[2]);
+    return isReplaceable(blockPos.offset(EnumFacing.values()[faceOrdinal]));
   }
 
-  /** Grim AirLiquidPlace — support block must be solid on the client world. */
-  static boolean isValidSupport(Object world, Object blockPos) {
-    if (world == null || blockPos == null)
+  static boolean isValidSupport(BlockPos blockPos) {
+    if (blockPos == null)
       return false;
-    int x = blockPosX(blockPos);
-    int y = blockPosY(blockPos);
-    int z = blockPosZ(blockPos);
-    if (x == Integer.MIN_VALUE)
-      return false;
-    return !McAccess.isReplaceable(world, x, y, z);
+    return !isReplaceable(blockPos);
   }
 
-  static Object faceHitVec(int bx, int by, int bz, int faceOrdinal) {
+  static Vec3 faceHitVec(int bx, int by, int bz, int faceOrdinal) {
     double x = bx + 0.5;
     double y = by + 0.5;
     double z = bz + 0.5;
@@ -255,110 +312,118 @@ final class ScaffoldPlacement {
       case 5: x = bx + 1.0; break;
       default: break;
     }
-    return vec3(x, y, z);
+    return new Vec3(x, y, z);
   }
 
-  static Object getClickVec(Object blockPos, int faceOrdinal) {
-    int bx = blockPosX(blockPos);
-    int by = blockPosY(blockPos);
-    int bz = blockPosZ(blockPos);
-    if (bx == Integer.MIN_VALUE)
+  static Vec3 getClickVec(BlockPos blockPos, int faceOrdinal) {
+    if (blockPos == null)
       return null;
-    return faceHitVec(bx, by, bz, faceOrdinal);
+    return faceHitVec(blockPos.getX(), blockPos.getY(), blockPos.getZ(), faceOrdinal);
   }
 
-  static Object enumFacing(int ordinal) {
-    Class<?> facingCls = McAccess.gameClass("net.minecraft.util.EnumFacing");
-    if (facingCls == null)
-      return null;
-    Object[] values = facingCls.getEnumConstants();
-    if (values == null || ordinal < 0 || ordinal >= values.length)
+  static EnumFacing enumFacing(int ordinal) {
+    EnumFacing[] values = EnumFacing.values();
+    if (ordinal < 0 || ordinal >= values.length)
       return null;
     return values[ordinal];
   }
 
-  static boolean matchesRaycast(Object mop, Object expectedPos, int expectedFace) {
-    return matchesRaycast(mop, expectedPos, expectedFace, Double.NEGATIVE_INFINITY);
-  }
-
-  static boolean matchesRaycast(Object mop, Object expectedPos, int expectedFace, double minPlacementY) {
+  static boolean matchesRaycast(MovingObjectPosition mop, BlockPos expectedPos, int expectedFace) {
     if (mop == null || expectedPos == null)
       return false;
-    if (!isBlockHit(mop))
-      return false;
-    Object hitPos = McAccess.invoke(mop, "func_178782_a", new Class<?>[0]);
-    if (hitPos == null || !hitPos.equals(expectedPos))
-      return false;
-    Object sideHit = McAccess.getObject(mop, "field_178784_b");
-    if (sideHit == null)
-      return false;
-    if (facingOrdinal(sideHit) != expectedFace)
-      return false;
-    Object hit = McAccess.getObject(mop, "field_72307_f");
-    return hit == null || hitY(hit) + 1.0E-5 >= minPlacementY;
+    return matchesFace(mop, expectedPos, EnumFacing.values()[expectedFace]);
   }
 
-  static boolean matchesRaycastBlock(Object mop, Object expectedPos) {
+  static boolean matchesRaycastBlock(MovingObjectPosition mop, BlockPos expectedPos) {
     if (mop == null || expectedPos == null)
       return false;
-    if (!isBlockHit(mop))
-      return false;
-    Object hitPos = McAccess.invoke(mop, "func_178782_a", new Class<?>[0]);
-    return hitPos != null && hitPos.equals(expectedPos);
-  }
-
-  private static boolean isBlockHit(Object mop) {
-    Object type = McAccess.getObject(mop, "field_72313_a");
-    if (type == null)
-      return false;
-    return "BLOCK".equals(String.valueOf(type));
-  }
-
-  private static int facingOrdinal(Object facing) {
-    if (facing instanceof Enum<?>)
-      return ((Enum<?>) facing).ordinal();
-    return McAccess.getInt(facing, "ordinal");
+    return matchesBlock(mop, expectedPos);
   }
 
   static int[] offset(int x, int y, int z, int faceOrdinal) {
-    switch (faceOrdinal) {
-      case 0: return new int[] {x, y - 1, z};
-      case 1: return new int[] {x, y + 1, z};
-      case 2: return new int[] {x, y, z - 1};
-      case 3: return new int[] {x, y, z + 1};
-      case 4: return new int[] {x - 1, y, z};
-      case 5: return new int[] {x + 1, y, z};
-      default: return new int[] {x, y, z};
+    EnumFacing f = EnumFacing.values()[faceOrdinal];
+    return new int[] {x + f.getFrontOffsetX(), y + f.getFrontOffsetY(), z + f.getFrontOffsetZ()};
+  }
+
+  static float wrapAngle(float angle) {
+    return MathHelper.wrapAngleTo180_float(angle);
+  }
+
+  static float clampPitch(float pitch) {
+    return MathHelper.clamp_float(pitch, -90.0f, 90.0f);
+  }
+
+  static float quantize(float angle) {
+    return quantize(angle, mouseGcd());
+  }
+
+  static float quantize(float angle, double gcd) {
+    double step = gcd > 0.0 ? gcd : 0.0096;
+    return (float) (angle - angle % step);
+  }
+
+  static int blockPosX(BlockPos pos) {
+    return pos == null ? Integer.MIN_VALUE : pos.getX();
+  }
+
+  static int blockPosY(BlockPos pos) {
+    return pos == null ? Integer.MIN_VALUE : pos.getY();
+  }
+
+  static int blockPosZ(BlockPos pos) {
+    return pos == null ? Integer.MIN_VALUE : pos.getZ();
+  }
+
+  static double mouseGcd() {
+    float sens = mc().gameSettings.mouseSensitivity;
+    float f = sens * 0.6f + 0.2f;
+    return f * f * f * 1.2f;
+  }
+
+  // ---- internals ----
+
+  private static MovingObjectPosition rayTrace(float yaw, float pitch, float reach) {
+    EntityPlayer player = mc().thePlayer;
+    World world = mc().theWorld;
+    if (player == null || world == null)
+      return null;
+    Vec3 start = new Vec3(player.posX, player.posY + player.getEyeHeight(), player.posZ);
+    float yawRad = (float) Math.toRadians(yaw);
+    float pitchRad = (float) Math.toRadians(pitch);
+    float cosPitch = MathHelper.cos(pitchRad);
+    float dx = -MathHelper.sin(yawRad) * cosPitch;
+    float dy = -MathHelper.sin(pitchRad);
+    float dz = MathHelper.cos(yawRad) * cosPitch;
+    Vec3 end = start.addVector(dx * reach, dy * reach, dz * reach);
+    return world.rayTraceBlocks(start, end, false, false, false);
+  }
+
+  private static boolean matchesFace(MovingObjectPosition mop, BlockPos pos, EnumFacing face) {
+    return matchesBlock(mop, pos) && mop.sideHit == face;
+  }
+
+  private static boolean matchesBlock(MovingObjectPosition mop, BlockPos pos) {
+    return mop != null
+        && mop.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK
+        && mop.getBlockPos() != null
+        && mop.getBlockPos().equals(pos);
+  }
+
+  private static EnumFacing bestFacing(int bx, int by, int bz, int tx, int ty, int tz) {
+    EnumFacing bestFace = null;
+    double bestDist = Double.MAX_VALUE;
+    for (EnumFacing face : PLACE_FACES) {
+      BlockPos adj = new BlockPos(bx, by, bz).offset(face);
+      if (adj.getY() > ty)
+        continue;
+      double dist = distSq(adj.getX() + 0.5, adj.getY() + 0.5, adj.getZ() + 0.5,
+          tx + 0.5, ty + 0.5, tz + 0.5);
+      if (bestFace == null || dist < bestDist || (dist == bestDist && face == EnumFacing.UP)) {
+        bestDist = dist;
+        bestFace = face;
+      }
     }
-  }
-
-  private static int offX(int faceOrdinal) {
-    return faceOrdinal == FACE_WEST ? -1 : faceOrdinal == FACE_EAST ? 1 : 0;
-  }
-
-  private static int offY(int faceOrdinal) {
-    return faceOrdinal == FACE_DOWN ? -1 : faceOrdinal == FACE_UP ? 1 : 0;
-  }
-
-  private static int offZ(int faceOrdinal) {
-    return faceOrdinal == FACE_NORTH ? -1 : faceOrdinal == FACE_SOUTH ? 1 : 0;
-  }
-
-  private static Object blockPos(int x, int y, int z) {
-    return McAccess.newInstance("net.minecraft.util.BlockPos",
-        new Class<?>[] {int.class, int.class, int.class}, x, y, z);
-  }
-
-  private static Object vec3(double x, double y, double z) {
-    return McAccess.newInstance("net.minecraft.util.Vec3",
-        new Class<?>[] {double.class, double.class, double.class}, x, y, z);
-  }
-
-  private static double distanceTo(Object player, double x, double y, double z) {
-    double dx = McAccess.entityPosX(player) - x;
-    double dy = McAccess.entityPosY(player) + eyeHeight(player) - y;
-    double dz = McAccess.entityPosZ(player) - z;
-    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    return bestFace;
   }
 
   private static double distSq(double x1, double y1, double z1, double x2, double y2, double z2) {
@@ -368,113 +433,18 @@ final class ScaffoldPlacement {
     return dx * dx + dy * dy + dz * dz;
   }
 
-  private static float[] rotationsTo(Object hitVec, Object player) {
-    return rotationsTo(hitVec, player, McAccess.getYaw(), McAccess.getPitch());
-  }
-
-  private static float[] rotationsTo(Object hitVec, Object player, float baseYaw, float basePitch) {
-    double hx = hitX(hitVec);
-    double hy = hitY(hitVec);
-    double hz = hitZ(hitVec);
-    double eyeY = McAccess.entityPosY(player) + eyeHeight(player);
-    double dx = hx - McAccess.entityPosX(player);
-    double dz = hz - McAccess.entityPosZ(player);
-    double dy = hy - eyeY;
-    double horiz = Math.sqrt(dx * dx + dz * dz);
-    float targetYaw = (float) (Math.atan2(dz, dx) * 57.2957795) - 90.0f;
-    float targetPitch = (float) (-(Math.atan2(dy, horiz) * 57.2957795));
-    float yaw = quantize(baseYaw + wrapAngle(targetYaw - baseYaw));
-    float pitch = quantize(basePitch + wrapAngle(targetPitch - basePitch));
+  private static float[] rotationsTo(Vec3 hit, EntityPlayer player, float baseYaw, float basePitch,
+                                     double gcd) {
+    double eyeY = player.posY + player.getEyeHeight();
+    double dx = hit.xCoord - player.posX;
+    double dz = hit.zCoord - player.posZ;
+    double dy = hit.yCoord - eyeY;
+    double horiz = MathHelper.sqrt_double(dx * dx + dz * dz);
+    float targetYaw = (float) (Math.atan2(dz, dx) * 180.0 / Math.PI) - 90.0f;
+    float targetPitch = (float) (-(Math.atan2(dy, horiz) * 180.0 / Math.PI));
+    double step = gcd > 0.0 ? gcd : 0.0096;
+    float yaw = quantize(baseYaw + wrapAngle(targetYaw - baseYaw), step);
+    float pitch = quantize(basePitch + wrapAngle(targetPitch - basePitch), step);
     return new float[] {yaw, clampPitch(pitch)};
-  }
-
-  private static double hitX(Object vec) {
-    return McAccess.getDouble(vec, "field_72450_a");
-  }
-
-  private static double hitY(Object vec) {
-    return McAccess.getDouble(vec, "field_72448_b");
-  }
-
-  private static double hitZ(Object vec) {
-    return McAccess.getDouble(vec, "field_72449_c");
-  }
-
-  private static double eyeHeight(Object player) {
-    Object eye = McAccess.invoke(player, "func_70047_e", new Class<?>[0]);
-    return eye instanceof Float ? (Float) eye : 1.62;
-  }
-
-  static float wrapAngle(float angle) {
-    Class<?> math = McAccess.gameClass("net.minecraft.util.MathHelper");
-    if (math == null)
-      return angle;
-    Object result = McAccess.invokeStatic(math, "func_76142_g", new Class<?>[] {float.class}, angle);
-    return result instanceof Float ? (Float) result : angle;
-  }
-
-  static float clampPitch(float pitch) {
-    return Math.max(-90.0f, Math.min(90.0f, pitch));
-  }
-
-  static float quantize(float angle) {
-    double gcd = McAccess.getMouseSensitivityGcd();
-    if (gcd <= 0.0)
-      gcd = 0.0096;
-    return (float) (angle - angle % gcd);
-  }
-
-  private static int bestFacing(int bx, int by, int bz, int tx, int ty, int tz) {
-    int bestFace = -1;
-    double bestDist = Double.MAX_VALUE;
-    for (int face : PLACE_FACES) {
-      int[] adj = offset(bx, by, bz, face);
-      if (adj[1] > ty)
-        continue;
-      double dist = distSq(adj[0] + 0.5, adj[1] + 0.5, adj[2] + 0.5,
-          tx + 0.5, ty + 0.5, tz + 0.5);
-      if (bestFace < 0 || dist < bestDist || (dist == bestDist && face == FACE_UP)) {
-        bestDist = dist;
-        bestFace = face;
-      }
-    }
-    return bestFace;
-  }
-
-  private static boolean isInteractable(Object world, int x, int y, int z) {
-    Object block = McAccess.getBlockFromState(McAccess.getBlockState(world, x, y, z));
-    if (block == null)
-      return false;
-    String cls = block.getClass().getName();
-    return cls.contains("Container") || cls.contains("Workbench") || cls.contains("Anvil")
-        || cls.contains("Bed") || cls.contains("Door") || cls.contains("TrapDoor")
-        || cls.contains("Fence") || cls.contains("Button") || cls.contains("Lever")
-        || cls.contains("Jukebox");
-  }
-
-  static int blockPosX(Object pos) {
-    Object x = McAccess.invoke(pos, "func_177958_n", new Class<?>[0]);
-    if (x == null)
-      x = McAccess.invokeNamed(pos, "getX", new Class<?>[0]);
-    return x instanceof Integer ? (Integer) x : Integer.MIN_VALUE;
-  }
-
-  static int blockPosY(Object pos) {
-    Object y = McAccess.invoke(pos, "func_177956_o", new Class<?>[0]);
-    if (y == null)
-      y = McAccess.invokeNamed(pos, "getY", new Class<?>[0]);
-    return y instanceof Integer ? (Integer) y : Integer.MIN_VALUE;
-  }
-
-  static int blockPosZ(Object pos) {
-    Object z = McAccess.invoke(pos, "func_177952_p", new Class<?>[0]);
-    if (z == null)
-      z = McAccess.invokeNamed(pos, "getZ", new Class<?>[0]);
-    return z instanceof Integer ? (Integer) z : Integer.MIN_VALUE;
-  }
-
-  private static int floor(double v) {
-    int i = (int) v;
-    return v < i ? i - 1 : i;
   }
 }

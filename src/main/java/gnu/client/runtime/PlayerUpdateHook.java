@@ -1,9 +1,11 @@
 package gnu.client.runtime;
 
+import gnu.client.mixin.impl.accessors.IAccessorEntityPlayerSP;
 import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.movement.StasisModule;
 import gnu.client.module.modules.player.ScaffoldModule;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
+import net.minecraft.client.entity.EntityPlayerSP;
 
 /**
  * Forge mixin hooks around {@code EntityPlayerSP.onUpdate} (see
@@ -28,10 +30,11 @@ public final class PlayerUpdateHook {
      * @return true to skip the rest of {@code onUpdate} (raven {@code CallbackInfo.cancel}).
      */
     public static boolean onUpdateHead(Object player) {
-        if (player == null)
+        if (!(player instanceof EntityPlayerSP))
             return false;
-        Object local = McAccess.thePlayer();
-        if (local == null || player != local)
+        EntityPlayerSP sp = (EntityPlayerSP) player;
+        EntityPlayerSP local = Mc.player();
+        if (local == null || sp != local)
             return false;
 
         clearRotationOverride();
@@ -47,22 +50,28 @@ public final class PlayerUpdateHook {
         overrideActive = true;
     }
 
-    /** Silent yaw for movefix physics — matches packet yaw ({@link RotationState#getSmoothedYaw()}). */
+    /**
+     * Yaw for movefix {@code moveFlying}/jump — OpenMyau uses
+     * {@link RotationState#getSmoothedYaw()} (move/perv yaw), not C03 packet yaw.
+     */
     public static float silentYawForMoveFix() {
         if (RotationState.isActived())
             return RotationState.getSmoothedYaw();
         if (overrideActive)
             return overrideYaw;
-        Object player = McAccess.thePlayer();
-        return player != null ? McAccess.getYaw() : 0.0f;
+        return Mc.getYaw();
     }
 
     public static float lastReportedYaw(Object player) {
-        return McAccess.getFloat(player, "field_175164_bL");
+        if (!(player instanceof IAccessorEntityPlayerSP))
+            return 0.0f;
+        return ((IAccessorEntityPlayerSP) player).getLastReportedYaw();
     }
 
     public static float lastReportedPitch(Object player) {
-        return McAccess.getFloat(player, "field_175165_bM");
+        if (!(player instanceof IAccessorEntityPlayerSP))
+            return 0.0f;
+        return ((IAccessorEntityPlayerSP) player).getLastReportedPitch();
     }
 
     public static void beforeWalkingPlayer(Object player) {
@@ -84,12 +93,11 @@ public final class PlayerUpdateHook {
         return overrideActive;
     }
 
-    /** After {@code onUpdateWalkingPlayer} — post-attack guard cleanup only. */
+    /** After {@code onUpdateWalkingPlayer} — post-attack hooks only (no sprint-suppress tick). */
     public static void onAfterWalkingPlayer(Object player) {
         if (!isLocal(player))
             return;
         KillAuraModule.onAfterWalking(player);
-        KillAuraModule.onPostAttackTick(player);
     }
 
     /** Apply requested silent rotation to the local player before block placement. */
@@ -98,47 +106,52 @@ public final class PlayerUpdateHook {
     }
 
     private static void beginRotationSwap(Object player) {
-        if (!isLocal(player) || !overrideActive)
+        if (!(player instanceof EntityPlayerSP))
+            return;
+        EntityPlayerSP sp = (EntityPlayerSP) player;
+        if (!isLocal(sp) || !overrideActive)
             return;
         if (!pendingRestore) {
-            pendingYaw = McAccess.getFloat(player, "field_70177_z");
-            pendingPitch = McAccess.getFloat(player, "field_70125_A");
+            pendingYaw = sp.rotationYaw;
+            pendingPitch = sp.rotationPitch;
             pendingRestore = true;
         }
-        McAccess.setFloat(player, "field_70177_z", overrideYaw);
-        McAccess.setFloat(player, "field_70125_A", overridePitch);
+        sp.rotationYaw = overrideYaw;
+        sp.rotationPitch = overridePitch;
     }
 
     public static void onUpdateReturn(Object player) {
-        if (!isLocal(player)) {
+        if (!(player instanceof EntityPlayerSP)) {
+            clearRotationOverride();
+            return;
+        }
+        EntityPlayerSP sp = (EntityPlayerSP) player;
+        if (!isLocal(sp)) {
             clearRotationOverride();
             return;
         }
         if (pendingRestore) {
-            float sentYaw = McAccess.getFloat(player, "field_70177_z");
-            float sentPitch = McAccess.getFloat(player, "field_70125_A");
-            McAccess.setFloat(player, "field_175164_bL", sentYaw);
-            McAccess.setFloat(player, "field_175165_bM", sentPitch);
+            float sentYaw = sp.rotationYaw;
+            float sentPitch = sp.rotationPitch;
+            IAccessorEntityPlayerSP accessor = (IAccessorEntityPlayerSP) sp;
+            accessor.setLastReportedYaw(sentYaw);
+            accessor.setLastReportedPitch(sentPitch);
 
             float restoredYaw = sentYaw + wrapAngle(pendingYaw - sentYaw);
-            McAccess.setFloat(player, "field_70177_z", restoredYaw);
-            McAccess.setFloat(player, "field_70125_A", pendingPitch);
-            McAccess.setFloat(player, "field_70126_B", restoredYaw);
-            McAccess.setFloat(player, "field_70127_C", pendingPitch);
-
-            if (RotationState.getPriority() == MoveFixUtil.KILLAURA_MOVE_FIX_PRIORITY)
-                RotationState.reset();
-        } else if (RotationState.getPriority() == MoveFixUtil.KILLAURA_MOVE_FIX_PRIORITY) {
-            RotationState.reset();
+            sp.rotationYaw = restoredYaw;
+            sp.rotationPitch = pendingPitch;
+            sp.prevRotationYaw = restoredYaw;
+            sp.prevRotationPitch = pendingPitch;
         }
-        KillAuraModule.onPostAttackTick(player);
+        // Do NOT reset RotationState here — OpenMyau keeps state through render
+        // (isRotated(1) for F5/FreeLook). Modules clear when they lose the target.
         clearRotationOverride();
     }
 
     private static boolean isLocal(Object player) {
         if (player == null)
             return false;
-        Object local = McAccess.thePlayer();
+        EntityPlayerSP local = Mc.player();
         return local != null && player == local;
     }
 

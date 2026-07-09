@@ -3,7 +3,9 @@ package gnu.client.runtime;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.modules.player.ScaffoldModule;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.entity.player.InventoryPlayer;
 
 /**
  * OpenMyau-style scaffold item-spoof render hooks.
@@ -26,7 +28,7 @@ public final class ScaffoldItemSpoofHook {
     }
 
     public static void beginRenderSlotSpoof() {
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         ScaffoldModule scaffold = activeScaffold();
         if (player == null || scaffold == null)
             return;
@@ -34,9 +36,9 @@ public final class ScaffoldItemSpoofHook {
         if (spoof < 0 || spoof > 8)
             return;
         if (spoofDepth == 0) {
-            savedSlot = McAccess.getHotbarSlot(player);
+            savedSlot = Mc.getHotbarSlot(player);
             if (savedSlot != spoof)
-                McAccess.setHotbarSlot(player, spoof);
+                Mc.setHotbarSlot(player, spoof);
             else
                 savedSlot = -1;
         }
@@ -49,9 +51,9 @@ public final class ScaffoldItemSpoofHook {
         spoofDepth--;
         if (spoofDepth != 0 || savedSlot < 0)
             return;
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player != null)
-            McAccess.setHotbarSlot(player, savedSlot);
+            Mc.setHotbarSlot(player, savedSlot);
         savedSlot = -1;
     }
 
@@ -60,13 +62,16 @@ public final class ScaffoldItemSpoofHook {
      * {@code GuiIngame.updateTick}.
      */
     public static Object redirectCurrentItem(Object inventoryPlayer) {
+        if (!(inventoryPlayer instanceof InventoryPlayer))
+            return null;
+        InventoryPlayer inventory = (InventoryPlayer) inventoryPlayer;
         ScaffoldModule scaffold = activeScaffold();
-        if (scaffold != null && inventoryPlayer != null) {
+        if (scaffold != null) {
             int spoof = scaffold.getSpoofSlot();
             if (spoof >= 0 && spoof <= 8)
-                return McAccess.getStackInSlot(inventoryPlayer, spoof);
+                return Mc.getStackInSlot(inventory, spoof);
         }
-        return McAccess.invoke(inventoryPlayer, "func_70448_g", new Class<?>[0]);
+        return inventory.getCurrentItem();
     }
 
     private static ScaffoldModule activeScaffold() {

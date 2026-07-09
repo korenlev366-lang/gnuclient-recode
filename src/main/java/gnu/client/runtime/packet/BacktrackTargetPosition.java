@@ -1,6 +1,6 @@
 package gnu.client.runtime.packet;
 
-import gnu.client.runtime.mc.McAccess;
+import net.minecraft.entity.Entity;
 
 /**
  * Tracks a target's server-side position from inbound {@code S14}/{@code S18} before they are processed.
@@ -14,13 +14,14 @@ public final class BacktrackTargetPosition {
     private boolean valid;
 
     public synchronized void setBaseFromEntity(Object entity) {
-        if (entity == null) {
+        if (!(entity instanceof Entity)) {
             valid = false;
             return;
         }
-        x = McAccess.getInt(entity, "field_70118_ct") / 32.0;
-        y = McAccess.getInt(entity, "field_70117_cu") / 32.0;
-        z = McAccess.getInt(entity, "field_70116_cv") / 32.0;
+        Entity e = (Entity) entity;
+        x = e.serverPosX / 32.0;
+        y = e.serverPosY / 32.0;
+        z = e.serverPosZ / 32.0;
         valid = true;
     }
 

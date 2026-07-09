@@ -1,6 +1,5 @@
 package gnu.client.script;
 
-import gnu.client.runtime.mc.McAccess;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketUtil;
 
@@ -11,9 +10,6 @@ import gnu.client.runtime.packet.PacketUtil;
 public final class Packets {
 
     public static final Packets INSTANCE = new Packets();
-
-    private static final String FIELD_C03_YAW = "field_149476_e";
-    private static final String FIELD_C03_PITCH = "field_149473_f";
 
     private Packets() {}
 
@@ -174,8 +170,7 @@ public final class Packets {
     public void setMovementRotation(Object packet, float yaw, float pitch) {
         if (!PacketHelper.isPlayerMovement(packet))
             return;
-        McAccess.setFloat(packet, FIELD_C03_YAW, yaw);
-        McAccess.setFloat(packet, FIELD_C03_PITCH, pitch);
+        PacketHelper.c03SetRotation(packet, yaw, pitch);
     }
 
     public void setMovementPosition(Object packet, double x, double y, double z) {

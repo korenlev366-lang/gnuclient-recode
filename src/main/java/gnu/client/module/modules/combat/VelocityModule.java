@@ -6,10 +6,13 @@ import gnu.client.module.ModuleManager;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.util.MovementInput;
 
 import java.util.Arrays;
 import java.util.Random;
@@ -154,15 +157,12 @@ public final class VelocityModule extends Module implements PacketListener {
 
     @Override
     public void onTick() {
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null)
             return;
 
         if (mode.getValue() == 0) {
-            // ── Reduce mode: existing behavior verbatim ──
-            // Fire every tick while hurt (not just the first frame): with OptiFine /
-            // Patcher the single-frame (hurtTime == maxHurtTime) edge is often missed.
-            int hurtTime = McAccess.getInt(player, "field_70737_aN");
+            int hurtTime = player.hurtTime;
             if (hurtTime <= 0)
                 return;
 
@@ -172,9 +172,9 @@ public final class VelocityModule extends Module implements PacketListener {
             double hMul = horizontal.getValue() / 100.0;
             double vMul = vertical.getValue() / 100.0;
 
-            McAccess.setDouble(player, "field_70159_w", McAccess.getDouble(player, "field_70159_w") * hMul);
-            McAccess.setDouble(player, "field_70179_y", McAccess.getDouble(player, "field_70179_y") * hMul);
-            McAccess.setDouble(player, "field_70181_x", McAccess.getDouble(player, "field_70181_x") * vMul);
+            player.motionX *= hMul;
+            player.motionZ *= hMul;
+            player.motionY *= vMul;
         }
         // JumpReset and Intave modes have no onTick work — they operate through
         // patchMovementInput (called from BridgeAssistModule) + packet hooks in onSend/onReceive.
@@ -185,11 +185,11 @@ public final class VelocityModule extends Module implements PacketListener {
         if (mode.getValue() != 1 && mode.getValue() != 2)
             return;
 
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null)
             return;
 
-        int hurtTime = McAccess.getInt(player, "field_70737_aN");
+        int hurtTime = player.hurtTime;
         if (hurtTime <= 0) {
             hasHitKnockback = false;
             isFallDamage = false;
@@ -205,19 +205,16 @@ public final class VelocityModule extends Module implements PacketListener {
     public boolean onSend(Object packet) {
         // ── Intave mode: reduce-on-attack ──
         if (mode.getValue() == 2 && PacketHelper.isAttackUseEntity(packet)) {
-            Object player = McAccess.thePlayer();
+            EntityPlayerSP player = Mc.player();
             if (player != null) {
-                int hurtTime = McAccess.getInt(player, "field_70737_aN");
+                int hurtTime = player.hurtTime;
                 long now = System.currentTimeMillis();
                 if (hurtTime >= intaveHurtMin.getValue().intValue()
                         && hurtTime <= intaveHurtMax.getValue().intValue()
                         && (now - lastAttackMs) <= intaveCooldownMs.getValue().longValue()) {
-                    double hx = McAccess.getDouble(player, "field_70159_w");
-                    double hz = McAccess.getDouble(player, "field_70179_y");
                     double factor = intaveFactor.getValue();
-                    McAccess.setDouble(player, "field_70159_w", hx * factor);
-                    McAccess.setDouble(player, "field_70179_y", hz * factor);
-                    // motionY untouched
+                    player.motionX *= factor;
+                    player.motionZ *= factor;
                 }
                 lastAttackMs = now;
             }
@@ -238,10 +235,10 @@ public final class VelocityModule extends Module implements PacketListener {
         if (!PacketHelper.isEntityVelocity(packet))
             return false;
 
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null)
             return false;
-        if (PacketHelper.velocityEntityId(packet) != McAccess.entityId(player))
+        if (PacketHelper.velocityEntityId(packet) != Mc.entityId(player))
             return false;
 
         int motionX = PacketHelper.velocityMotionX(packet);
@@ -285,17 +282,15 @@ public final class VelocityModule extends Module implements PacketListener {
     // ────────────────────────────────────────────────────────────────
 
     private void applyJumpAtMovementInput(Object movInput) {
-        Object player = McAccess.thePlayer();
-        if (player == null || movInput == null) {
+        EntityPlayerSP player = Mc.player();
+        if (player == null || movInput == null)
             return;
-        }
 
-        if (disableInWater.getValue() && isInWater(player)) {
+        if (disableInWater.getValue() && player.isInWater())
             return;
-        }
 
-        int hurtTime = McAccess.getInt(player, "field_70737_aN");
-        boolean onGround = McAccess.getBool(player, "field_70122_E");
+        int hurtTime = player.hurtTime;
+        boolean onGround = player.onGround;
         boolean sprinting = passesSprintGate(player);
 
         incrementTicksSinceKnockback();
@@ -325,10 +320,8 @@ public final class VelocityModule extends Module implements PacketListener {
             return;
         }
 
-        McAccess.setBool(movInput, "field_78901_c", true);
-        // MCP name fallback if SRG lookup missed (Forge runClient / mcpRuntime).
-        if (!McAccess.getBool(movInput, "field_78901_c"))
-            McAccess.setBool(movInput, "jump", true);
+        MovementInput input = (MovementInput) movInput;
+        input.jump = true;
         hasHitKnockback = false;
         ticksSinceKnockback = 0;
     }
@@ -344,10 +337,10 @@ public final class VelocityModule extends Module implements PacketListener {
     private void incrementTicksSinceKnockback() {
         if (!hasHitKnockback)
             return;
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null)
             return;
-        int tick = McAccess.getInt(player, "field_70173_aa");
+        int tick = player.ticksExisted;
         if (tick == lastLimitTick)
             return;
         lastLimitTick = tick;
@@ -379,12 +372,7 @@ public final class VelocityModule extends Module implements PacketListener {
         return (float) Math.sqrt(hx * hx + hz * hz);
     }
 
-    private static boolean isInWater(Object player) {
-        Object r = McAccess.invoke(player, "func_70090_H", new Class<?>[0]);
-        return r instanceof Boolean && (Boolean) r;
-    }
-
-    private boolean passesSprintGate(Object player) {
+    private boolean passesSprintGate(EntityPlayerSP player) {
         if (!sprintingOnly.getValue())
             return true;
 
@@ -394,10 +382,9 @@ public final class VelocityModule extends Module implements PacketListener {
         if (player == null)
             return false;
 
-        Object sprinting = McAccess.invoke(player, "func_70051_af", new Class<?>[0]);
-        if (sprinting instanceof Boolean && (Boolean) sprinting)
+        if (player.isSprinting())
             return true;
 
-        return McAccess.getInt(player, "field_20052_b") > 0;
+        return Mc.settings().keyBindSprint.isKeyDown();
     }
 }

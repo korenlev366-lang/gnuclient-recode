@@ -3,7 +3,7 @@ package gnu.client.module.modules.player;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.setting.BoolSetting;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import net.minecraft.client.Minecraft;
 
 /**
@@ -27,14 +27,14 @@ public final class DelayRemoverModule extends Module {
 
     @Override
     public void onTick() {
-        Minecraft mc = Minecraft.getMinecraft();
-        if (mc == null || !mc.inGameHasFocus || !McAccess.isInGame())
+        Minecraft mc = Mc.mc();
+        if (mc == null || !mc.inGameHasFocus || !Mc.isInGame())
             return;
 
         if (oldReg.getValue())
-            McAccess.clearLeftClickCounter();
+            Mc.clearLeftClickCounter();
 
         if (removeJumpTicks.getValue())
-            McAccess.clearJumpTicks(McAccess.thePlayer());
+            Mc.clearJumpTicks(Mc.player());
     }
 }

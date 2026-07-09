@@ -1,8 +1,8 @@
 package gnu.client.mixin.impl.entity;
 
 import com.mojang.authlib.GameProfile;
-import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.runtime.PlayerUpdateHook;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.event.PostMotionEvent;
 import gnu.client.event.PostUpdateEvent;
 import gnu.client.event.PreMotionEvent;
@@ -13,7 +13,6 @@ import net.minecraft.client.entity.AbstractClientPlayer;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.network.NetHandlerPlayClient;
 import net.minecraft.network.play.client.C03PacketPlayer;
-import net.minecraft.network.play.client.C0BPacketEntityAction;
 import net.minecraft.util.BlockPos;
 import net.minecraft.world.World;
 import net.minecraftforge.common.MinecraftForge;
@@ -88,31 +87,16 @@ public abstract class MixinEntityPlayerSP extends AbstractClientPlayer {
         MinecraftForge.EVENT_BUS.post(preMotionEvent);
         RotationUtils.serverRotations = new float[] { preMotionEvent.getYaw(), preMotionEvent.getPitch() };
 
+        // Route sprint/sneak C0B through Mc so AuraCombatPacketGuard can cancel
+        // duplicates (BadPacketsX) and server*State only flips on a real send.
+        EntityPlayerSP self = (EntityPlayerSP) (Object) this;
         boolean sprinting = preMotionEvent.isSprinting();
-        if (sprinting != this.serverSprintState) {
-            if (sprinting) {
-                // Aura attack tick: do not START_SPRINTING before C03 (BadPacketsX / AttackSlow).
-                // Must not flip serverSprintState when the packet is cancelled — otherwise the
-                // next tick never re-sends START and client/server sprint desyncs.
-                if (!KillAuraModule.shouldSuppressSprintRestart()) {
-                    this.sendQueue.addToSendQueue(new C0BPacketEntityAction(this, C0BPacketEntityAction.Action.START_SPRINTING));
-                    this.serverSprintState = true;
-                }
-            } else {
-                this.sendQueue.addToSendQueue(new C0BPacketEntityAction(this, C0BPacketEntityAction.Action.STOP_SPRINTING));
-                this.serverSprintState = false;
-            }
-        }
+        if (sprinting != this.serverSprintState)
+            Mc.sendSprintActionPacket(self, sprinting);
 
         boolean sneaking = preMotionEvent.isSneaking();
-        if (sneaking != this.serverSneakState) {
-            if (sneaking) {
-                this.sendQueue.addToSendQueue(new C0BPacketEntityAction(this, C0BPacketEntityAction.Action.START_SNEAKING));
-            } else {
-                this.sendQueue.addToSendQueue(new C0BPacketEntityAction(this, C0BPacketEntityAction.Action.STOP_SNEAKING));
-            }
-            this.serverSneakState = sneaking;
-        }
+        if (sneaking != this.serverSneakState)
+            Mc.sendSneakActionPacket(self, sneaking);
 
         if (this.isCurrentViewEntity()) {
             if (PreMotionEvent.setRenderYaw()) {

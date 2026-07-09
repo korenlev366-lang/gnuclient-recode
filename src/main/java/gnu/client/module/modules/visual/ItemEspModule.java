@@ -4,18 +4,18 @@ import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.util.RenderHelper;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.item.EntityItem;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Highlights dropped diamond/emerald/gold/iron items (Raven-bS ItemESP parity).
- *
- * <p>Uses item IDs via reflection (not class name matching) so it works in
- * fully obfuscated notch runtimes where class names like {@code EntityItem}
- * are not visible.</p>
  */
 public final class ItemEspModule extends Module {
 
@@ -45,11 +45,6 @@ public final class ItemEspModule extends Module {
 
     private final List<EntityData> cache = new ArrayList<>();
 
-    // Reflection caches
-    private Class<?> entityItemClass;
-    private Class<?> itemClass;
-    private boolean reflectionFailed;
-
     public ItemEspModule() {
         super("ItemESP", "Highlight valuable dropped items", Category.VISUALS);
     }
@@ -57,7 +52,6 @@ public final class ItemEspModule extends Module {
     @Override
     public void onEnable() {
         cache.clear();
-        reflectionFailed = false;
     }
 
     @Override
@@ -69,45 +63,35 @@ public final class ItemEspModule extends Module {
     public void onTick() {
         cache.clear();
 
-        Object player = McAccess.thePlayer();
-        Object world = McAccess.theWorld();
-        if (player == null || world == null)
+        if (Mc.player() == null || Mc.world() == null)
             return;
 
-        ensureReflectionCache();
-        if (reflectionFailed)
-            return;
-
-        double px = McAccess.entityPosX(player);
-        double py = McAccess.entityPosY(player);
-        double pz = McAccess.entityPosZ(player);
+        double px = Mc.player().posX;
+        double py = Mc.player().posY;
+        double pz = Mc.player().posZ;
         double maxDistSq = maxDist.getValue() * maxDist.getValue();
 
-        List<?> entities = McAccess.getWorldEntitiesFiltered(world);
-        for (Object entity : entities) {
-            if (entity == null)
-                continue;
-            if (!entityItemClass.isInstance(entity))
+        for (Entity entity : Mc.getWorldEntitiesFiltered(Mc.world())) {
+            if (!(entity instanceof EntityItem))
                 continue;
 
-            // EntityItem.getEntityItem() -> ItemStack
-            Object stack = McAccess.invoke(entity, "func_92059_d", new Class<?>[0]);
+            EntityItem itemEntity = (EntityItem) entity;
+            ItemStack stack = itemEntity.getEntityItem();
             if (stack == null)
                 continue;
 
-            // ItemStack.getItem()
-            Object item = McAccess.invoke(stack, "func_77973_b", new Class<?>[0]);
+            Item item = stack.getItem();
             if (item == null)
                 continue;
 
-            int itemId = getItemId(item);
+            int itemId = Item.getIdFromItem(item);
             float[] color = colorForId(itemId);
             if (color == null)
                 continue;
 
-            double posX = McAccess.entityPosX(entity);
-            double posY = McAccess.entityPosY(entity);
-            double posZ = McAccess.entityPosZ(entity);
+            double posX = entity.posX;
+            double posY = entity.posY;
+            double posZ = entity.posZ;
 
             double dx = posX - px;
             double dy = posY - py;
@@ -116,9 +100,9 @@ public final class ItemEspModule extends Module {
                 continue;
 
             EntityData data = new EntityData();
-            data.lastX = McAccess.entityLastX(entity);
-            data.lastY = McAccess.entityLastY(entity);
-            data.lastZ = McAccess.entityLastZ(entity);
+            data.lastX = entity.lastTickPosX;
+            data.lastY = entity.lastTickPosY;
+            data.lastZ = entity.lastTickPosZ;
             data.posX = posX;
             data.posY = posY;
             data.posZ = posZ;
@@ -134,10 +118,10 @@ public final class ItemEspModule extends Module {
         if (cache.isEmpty())
             return;
 
-        Object mc = McAccess.getMinecraft();
-        if (mc == null)
+        if (!Mc.isInGame())
             return;
-        double[] vp = McAccess.getViewerPos(mc, partialTicks);
+
+        double[] vp = Mc.getViewerPos(partialTicks);
         double rvpX = vp[0];
         double rvpY = vp[1];
         double rvpZ = vp[2];
@@ -145,9 +129,9 @@ public final class ItemEspModule extends Module {
         RenderHelper.begin();
 
         for (EntityData data : cache) {
-            double ix = data.lastX + (data.posX - data.lastX) * partialTicks;
-            double iy = data.lastY + (data.posY - data.lastY) * partialTicks;
-            double iz = data.lastZ + (data.posZ - data.lastZ) * partialTicks;
+            double ix = Mc.lerp(data.lastX, data.posX, partialTicks);
+            double iy = Mc.lerp(data.lastY, data.posY, partialTicks);
+            double iz = Mc.lerp(data.lastZ, data.posZ, partialTicks);
 
             double rx = ix - rvpX;
             double ry = iy - rvpY;
@@ -164,30 +148,6 @@ public final class ItemEspModule extends Module {
         }
 
         RenderHelper.end();
-    }
-
-    private void ensureReflectionCache() {
-        if (entityItemClass != null || reflectionFailed)
-            return;
-        entityItemClass = McAccess.gameClass("net.minecraft.entity.item.EntityItem");
-        itemClass = McAccess.gameClass("net.minecraft.item.Item");
-        if (entityItemClass == null || itemClass == null) {
-            reflectionFailed = true;
-        }
-    }
-
-    /**
-     * Get the numeric item ID (e.g. 264 for diamond) via reflection.
-     * Uses {@code Item.getIdFromItem()} (SRG func_150891_b).
-     */
-    private int getItemId(Object item) {
-        if (item == null || itemClass == null)
-            return -1;
-        Object result = McAccess.invokeStatic(itemClass, "func_150891_b",
-                new Class<?>[] { itemClass }, item);
-        if (result instanceof Integer)
-            return (Integer) result;
-        return -1;
     }
 
     /**

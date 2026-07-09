@@ -2,10 +2,12 @@ package gnu.client.module.modules.movement;
 
 import gnu.client.module.Category;
 import gnu.client.module.Module;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.util.MovementInput;
 
 /**
  * raven-bS {@code Stasis} — zero local motion/input and block position {@code C03} packets
@@ -32,12 +34,11 @@ public final class StasisModule extends Module implements PacketListener {
         Module module = gnu.client.module.ModuleManager.INSTANCE.getModule("Stasis");
         if (!(module instanceof StasisModule) || !module.isEnabled())
             return;
-        if (player == null || McAccess.thePlayer() == null)
+        if (!(player instanceof EntityPlayerSP) || Mc.player() == null)
             return;
 
-        McAccess.setDouble(player, "field_70159_w", 0.0);
-        McAccess.setDouble(player, "field_70181_x", 0.0);
-        McAccess.setDouble(player, "field_70179_y", 0.0);
+        EntityPlayerSP sp = (EntityPlayerSP) player;
+        Mc.setEntityMotion(sp, 0.0, 0.0, 0.0);
     }
 
     /** raven {@code PrePlayerInputEvent} — {@code MovementInputHook.afterUpdatePlayerMoveState}. */
@@ -45,11 +46,12 @@ public final class StasisModule extends Module implements PacketListener {
         Module module = gnu.client.module.ModuleManager.INSTANCE.getModule("Stasis");
         if (!(module instanceof StasisModule) || !module.isEnabled())
             return;
-        if (movementInput == null)
+        if (!(movementInput instanceof MovementInput))
             return;
 
-        McAccess.setFloat(movementInput, "field_78902_a", 0.0f);
-        McAccess.setFloat(movementInput, "field_78900_b", 0.0f);
+        MovementInput input = (MovementInput) movementInput;
+        input.moveForward = 0.0f;
+        input.moveStrafe = 0.0f;
     }
 
     @Override

@@ -1,10 +1,13 @@
 package gnu.client.module.modules.movement;
 
+import gnu.client.mixin.impl.accessors.IAccessorMinecraft;
+import gnu.client.mixin.impl.accessors.IAccessorTimer;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
+import net.minecraft.util.Timer;
 
 /**
  * Simple timer — sets {@code Timer.timerSpeed} while enabled and restores vanilla
@@ -23,7 +26,7 @@ public final class TimerModule extends Module {
     public static void maintain() {
         Module module = ModuleManager.INSTANCE.getModule("Timer");
         if (!(module instanceof TimerModule) || !module.isEnabled())
-            McAccess.resetTimer();
+            Mc.resetTimer();
     }
 
     @Override
@@ -33,7 +36,7 @@ public final class TimerModule extends Module {
 
     @Override
     public void onDisable() {
-        McAccess.resetTimer();
+        Mc.resetTimer();
     }
 
     @Override
@@ -49,7 +52,9 @@ public final class TimerModule extends Module {
     private void apply() {
         if (!isEnabled())
             return;
-        McAccess.setTimerSpeed(speed.getValue());
+        Timer timer = ((IAccessorMinecraft) Mc.mc()).getTimer();
+        if (timer != null)
+            ((IAccessorTimer) timer).setTimerSpeed(speed.getValue());
     }
 
     @Override

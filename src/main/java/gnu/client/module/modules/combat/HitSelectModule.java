@@ -6,12 +6,17 @@ import gnu.client.module.ModuleManager;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
-
-import java.lang.reflect.Field;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.multiplayer.WorldClient;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.potion.Potion;
+import net.minecraft.util.MovingObjectPosition;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -90,7 +95,7 @@ public final class HitSelectModule extends Module implements PacketListener {
     private final Map<Integer, TargetState> targetStates = new HashMap<>();
 
     // Current target (nearest valid player in range)
-    private Object currentTarget;
+    private Entity currentTarget;
     private int currentTargetId = -1;
 
     // Self-damage tracking
@@ -154,8 +159,8 @@ public final class HitSelectModule extends Module implements PacketListener {
         tickCounter++;
         int currentTick = tickCounter;
 
-        Object player = McAccess.thePlayer();
-        Object world = McAccess.theWorld();
+        EntityPlayerSP player = Mc.player();
+        WorldClient world = Mc.world();
         if (player == null || world == null) {
             resetAllState();
             return;
@@ -164,7 +169,7 @@ public final class HitSelectModule extends Module implements PacketListener {
         pruneTargetStates(world);
 
         // Find current target (nearest valid player in HIT_RANGE)
-        Object nextTarget = findNearestTarget(player, world);
+        Entity nextTarget = findNearestTarget(player, world);
         updateCurrentTarget(nextTarget, player, currentTick);
         updateSelfDamage(player, currentTick);
         updateTargetDamage(currentTick);
@@ -183,7 +188,7 @@ public final class HitSelectModule extends Module implements PacketListener {
         int currentTick = tickCounter;
 
         int targetId = PacketHelper.packetEntityIdInWorld(
-                packet, McAccess.theWorld());
+                packet, Mc.world());
         if (targetId < 0)
             return false;
 
@@ -207,21 +212,21 @@ public final class HitSelectModule extends Module implements PacketListener {
     // ────────────────────────────────────────────────────────────────
 
     private boolean internalShouldBlock() {
-        Object player = McAccess.thePlayer();
-        Object world = McAccess.theWorld();
+        EntityPlayerSP player = Mc.player();
+        WorldClient world = Mc.world();
         if (player == null || world == null)
             return false;
 
         int currentTick = tickCounter;
 
         // Re-sync target state from current tick data
-        Object target = findMouseOverTarget(player, world);
+        Entity target = findMouseOverTarget(player, world);
         if (target == null) {
             // Missed swing — apply cancel rate
             return shouldCancel(missedSwingsCancelRate.getValue());
         }
 
-        int targetId = McAccess.entityId(target);
+        int targetId = Mc.entityId(target);
         if (targetId < 0)
             return false;
 
@@ -256,7 +261,7 @@ public final class HitSelectModule extends Module implements PacketListener {
     // Target / self state updates
     // ────────────────────────────────────────────────────────────────
 
-    private void updateCurrentTarget(Object nextTarget, Object player, int currentTick) {
+    private void updateCurrentTarget(Entity nextTarget, EntityPlayerSP player, int currentTick) {
         if (sameTarget(nextTarget)) {
             if (nextTarget != null)
                 getOrCreateTargetState(currentTargetId);
@@ -264,7 +269,7 @@ public final class HitSelectModule extends Module implements PacketListener {
         }
 
         currentTarget = nextTarget;
-        currentTargetId = nextTarget != null ? McAccess.entityId(nextTarget) : -1;
+        currentTargetId = nextTarget != null ? Mc.entityId(nextTarget) : -1;
 
         if (nextTarget == null) {
             resetWaitFirstState();
@@ -276,8 +281,8 @@ public final class HitSelectModule extends Module implements PacketListener {
         }
     }
 
-    private void updateSelfDamage(Object player, int currentTick) {
-        int hurtTime = McAccess.getInt(player, "field_70737_aN");
+    private void updateSelfDamage(EntityPlayerSP player, int currentTick) {
+        int hurtTime = player.hurtTime;
         boolean hurtAgain = hurtTime > lastSelfHurtTime;
 
         if (hurtAgain) {
@@ -294,7 +299,7 @@ public final class HitSelectModule extends Module implements PacketListener {
         }
 
         if (takingKnockback) {
-            boolean onGround = McAccess.getBool(player, "field_70122_E");
+            boolean onGround = player.onGround;
             if (onGround && !hurtAgain)
                 takingKnockback = false;
         }
@@ -306,12 +311,12 @@ public final class HitSelectModule extends Module implements PacketListener {
         if (currentTargetId < 0 || !useServerAttackTime.getValue())
             return;
 
-        Object target = getEntityById(currentTargetId);
-        if (target == null)
+        Entity target = getEntityById(currentTargetId);
+        if (target == null || !(target instanceof EntityLivingBase))
             return;
 
         TargetState state = getOrCreateTargetState(currentTargetId);
-        int targetHurtTime = McAccess.getInt(target, "field_70737_aN");
+        int targetHurtTime = ((EntityLivingBase) target).hurtTime;
 
         // Timeout check
         if (state.pendingServerConfirmationTick >= 0
@@ -335,7 +340,7 @@ public final class HitSelectModule extends Module implements PacketListener {
     // Block mask computation
     // ────────────────────────────────────────────────────────────────
 
-    private int getValidHitBlockMask(TargetState state, Object target, int currentTick) {
+    private int getValidHitBlockMask(TargetState state, Entity target, int currentTick) {
         if (currentTargetId < 0)
             return 0;
 
@@ -355,7 +360,7 @@ public final class HitSelectModule extends Module implements PacketListener {
         return blockMask;
     }
 
-    private int getBurstBlockMask(TargetState state, Object target, int currentTick) {
+    private int getBurstBlockMask(TargetState state, Entity target, int currentTick) {
         if (useServerAttackTime.getValue()) {
             if (state.lastConfirmedTargetDamageTick >= 0
                     && currentTick - state.lastConfirmedTargetDamageTick < SERVER_COOLDOWN_TICKS) {
@@ -377,12 +382,11 @@ public final class HitSelectModule extends Module implements PacketListener {
         if (mode.getValue() != 1)
             return false;
 
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null)
             return true;
 
-        boolean onGround = McAccess.getBool(player, "field_70122_E");
-        if (onGround)
+        if (player.onGround)
             return false;
 
         if (onlyWhileDamaged.getValue() && !state.firstSelfHitSeen)
@@ -407,31 +411,18 @@ public final class HitSelectModule extends Module implements PacketListener {
         return requiredTicks > 0 && currentTick - waitFirstStartTick < requiredTicks;
     }
 
-    private boolean canCriticalHit(Object player) {
+    private boolean canCriticalHit(EntityPlayerSP player) {
         if (player == null)
             return false;
 
-        Class<?> potionCls = McAccess.gameClass("net.minecraft.potion.Potion");
-        boolean blinded = false;
-        if (potionCls != null) {
-            try {
-                Field blindnessField = potionCls.getField("blindness");
-                        Object blindness = blindnessField.get(null);
-                if (blindness != null) {
-                    Object r = McAccess.invoke(player, "func_70644_a",
-                            new Class<?>[] { potionCls }, blindness);
-                    blinded = r instanceof Boolean && (Boolean) r;
-                }
-            } catch (Throwable ignored) {
-            }
-        }
+        boolean blinded = player.isPotionActive(Potion.blindness);
 
-        return McAccess.getFloat(player, "field_70143_R") > 0.0f       // fallDistance > 0
-                && !McAccess.getBool(player, "field_70122_E")            // !onGround
-                && !isOnLadder(player)
-                && !isInWater(player)
+        return player.fallDistance > 0.0f
+                && !player.onGround
+                && !player.isOnLadder()
+                && !player.isInWater()
                 && !blinded
-                && McAccess.getObject(player, "field_70153_n") == null; // ridingEntity == null
+                && player.ridingEntity == null;
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -466,7 +457,7 @@ public final class HitSelectModule extends Module implements PacketListener {
     // Valid-hit recording
     // ────────────────────────────────────────────────────────────────
 
-    private void recordPassedValidHit(Object target, int targetId, int currentTick) {
+    private void recordPassedValidHit(Entity target, int targetId, int currentTick) {
         if (target == null || targetId < 0)
             return;
 
@@ -514,25 +505,21 @@ public final class HitSelectModule extends Module implements PacketListener {
     // Target finding (nearest valid player in range)
     // ────────────────────────────────────────────────────────────────
 
-    private Object findNearestTarget(Object player, Object world) {
-        Class<?> playerCls = McAccess.gameClass("net.minecraft.entity.player.EntityPlayer");
-        if (playerCls == null)
-            return null;
-
-        Object best = null;
+    private Entity findNearestTarget(EntityPlayerSP player, WorldClient world) {
+        Entity best = null;
         double bestDist = HIT_RANGE_SQ;
 
-        for (Object entity : McAccess.getWorldEntities(world)) {
-            if (entity == null || !playerCls.isInstance(entity))
+        for (Entity entity : Mc.getWorldEntities(world)) {
+            if (entity == null || !(entity instanceof EntityPlayer))
                 continue;
             if (entity == player)
                 continue;
             if (!isValidTarget(entity))
                 continue;
 
-            double dx = McAccess.entityPosX(entity) - McAccess.entityPosX(player);
-            double dy = McAccess.entityPosY(entity) - McAccess.entityPosY(player);
-            double dz = McAccess.entityPosZ(entity) - McAccess.entityPosZ(player);
+            double dx = entity.posX - player.posX;
+            double dy = entity.posY - player.posY;
+            double dz = entity.posZ - player.posZ;
             double distSq = dx * dx + dy * dy + dz * dz;
 
             if (distSq < bestDist) {
@@ -544,29 +531,25 @@ public final class HitSelectModule extends Module implements PacketListener {
         return best;
     }
 
-    private Object findMouseOverTarget(Object player, Object world) {
-        Object mop = McAccess.objectMouseOver();
+    private Entity findMouseOverTarget(EntityPlayerSP player, WorldClient world) {
+        MovingObjectPosition mop = Mc.objectMouseOver();
         if (mop == null)
             return null;
-        Object hit = McAccess.getObject(mop, "field_72308_g");
-        if (hit == null)
+        Entity hit = mop.entityHit;
+        if (hit == null || !(hit instanceof EntityPlayer))
             return null;
-
-        Class<?> playerCls = McAccess.gameClass("net.minecraft.entity.player.EntityPlayer");
-        if (playerCls == null || !playerCls.isInstance(hit))
-            return null;
-        if (!isValidTarget((Object) hit))
+        if (!isValidTarget(hit))
             return null;
 
         return hit;
     }
 
-    private static boolean isValidTarget(Object entity) {
+    private static boolean isValidTarget(Entity entity) {
         if (entity == null)
             return false;
-        if (McAccess.getBool(entity, "field_70128_L"))
+        if (entity.isDead)
             return false;
-        if (entity == McAccess.thePlayer())
+        if (entity == Mc.player())
             return false;
         return true;
     }
@@ -581,41 +564,30 @@ public final class HitSelectModule extends Module implements PacketListener {
         return (int) Math.ceil(ms / 50.0);
     }
 
-    private boolean sameTarget(Object nextTarget) {
+    private boolean sameTarget(Entity nextTarget) {
         if (currentTarget == null || nextTarget == null)
             return currentTarget == nextTarget;
-        return McAccess.entityId(currentTarget) == McAccess.entityId(nextTarget);
+        return Mc.entityId(currentTarget) == Mc.entityId(nextTarget);
     }
 
     private boolean isTakingKnockback() {
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null)
             return false;
-        return takingKnockback || McAccess.getInt(player, "field_70737_aN") > 0;
+        return takingKnockback || player.hurtTime > 0;
     }
 
-    private void doFakeSwing(Object player) {
-        if (player == null)
-            return;
-        McAccess.invoke(player, "func_71038_i", new Class<?>[0]); // swingItem
+    private void doFakeSwing(EntityPlayerSP player) {
+        if (player != null)
+            player.swingItem();
     }
 
-    private static boolean isOnLadder(Object player) {
-        Object r = McAccess.invoke(player, "func_70617_f_", new Class<?>[0]);
-        return r instanceof Boolean && (Boolean) r;
-    }
-
-    private static boolean isInWater(Object player) {
-        Object r = McAccess.invoke(player, "func_70090_H", new Class<?>[0]);
-        return r instanceof Boolean && (Boolean) r;
-    }
-
-    private Object getEntityById(int entityId) {
-        Object world = McAccess.theWorld();
+    private Entity getEntityById(int entityId) {
+        WorldClient world = Mc.world();
         if (world == null)
             return null;
-        for (Object entity : McAccess.getWorldEntities(world)) {
-            if (entity != null && McAccess.entityId(entity) == entityId)
+        for (Entity entity : Mc.getWorldEntities(world)) {
+            if (entity != null && Mc.entityId(entity) == entityId)
                 return entity;
         }
         return null;
@@ -630,17 +602,17 @@ public final class HitSelectModule extends Module implements PacketListener {
         if (state == null) {
             state = new TargetState();
             if (useServerAttackTime.getValue()) {
-                Object entity = getEntityById(entityId);
-                if (entity != null)
+                Entity entity = getEntityById(entityId);
+                if (entity instanceof EntityLivingBase)
                     state.lastObservedTargetHurtTime =
-                            McAccess.getInt(entity, "field_70737_aN");
+                            ((EntityLivingBase) entity).hurtTime;
             }
             targetStates.put(entityId, state);
         }
         return state;
     }
 
-    private void pruneTargetStates(Object world) {
+    private void pruneTargetStates(WorldClient world) {
         if (world == null) {
             targetStates.clear();
             return;
@@ -651,9 +623,8 @@ public final class HitSelectModule extends Module implements PacketListener {
         while (it.hasNext()) {
             Map.Entry<Integer, TargetState> entry = it.next();
             int id = entry.getKey();
-            Object entity = getEntityById(id);
-            if (entity == null
-                    || McAccess.getBool(entity, "field_70128_L")) {
+            Entity entity = getEntityById(id);
+            if (entity == null || entity.isDead) {
                 it.remove();
             }
         }

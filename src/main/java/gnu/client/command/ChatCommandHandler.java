@@ -1,6 +1,7 @@
 package gnu.client.command;
 
 import gnu.client.common.GnuLog;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
@@ -34,9 +35,11 @@ public final class ChatCommandHandler implements PacketListener {
             return false;
 
         String result = BindCommand.execute(message);
-        if (result != null)
+        if (result != null) {
             GnuLog.log("CMD_ " + result);
-        return true;
+            Mc.addChatMessage("§7[GNU] §f" + result);
+        }
+        return true; // cancel outbound chat packet
     }
 
     @Override

@@ -8,9 +8,9 @@ import gnu.client.module.setting.BoolSetting;
 /**
  * Toggle gate for Raven-bS AntiBot filtering across combat and visual consumers.
  *
- * <p>This module intentionally has no per-tick logic. Consumers either request
- * {@link gnu.client.runtime.mc.McAccess#getWorldEntitiesFiltered(Object)} or
- * apply the same RavenAntiBot.isBot(Object) gate inline.</p>
+ * <p>Enable this module to activate {@link RavenAntiBot#isBot}. Consumers use
+ * {@link gnu.client.runtime.mc.Mc#getWorldEntitiesFiltered} and/or call
+ * {@code RavenAntiBot.isBot} inline (KillAura BotCheck, NameTags, etc.).</p>
  */
 public final class AntiBotModule extends Module {
 
@@ -33,9 +33,8 @@ public final class AntiBotModule extends Module {
 
     public static boolean isTablistCheckEnabled() {
         Module module = ModuleManager.INSTANCE.getModule("AntiBot");
-        if (module instanceof AntiBotModule) {
-            return ((AntiBotModule) module).tablistCheck.getValue();
-        }
-        return false;
+        if (!(module instanceof AntiBotModule) || !module.isEnabled())
+            return false;
+        return ((AntiBotModule) module).tablistCheck.getValue();
     }
 }

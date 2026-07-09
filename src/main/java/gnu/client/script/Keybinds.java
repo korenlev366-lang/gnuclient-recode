@@ -1,19 +1,12 @@
 package gnu.client.script;
 
 import gnu.client.runtime.ClientBootstrap;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 
 /**
  * Script-facing {@code keybinds} accessor — stateless singleton facade over
- * {@link ClientBootstrap} (LWJGL LMB) and {@link McAccess}
- * (LWJGL RMB, vanilla {@code sendUseItem}).
- *
- * <p>Mouse-button dispatch:
- * <ul>
- *   <li>button {@code 0} (LMB) → {@link ClientBootstrap#isLeftMouseDown()} (LWJGL button 0)</li>
- *   <li>button {@code 1} (RMB) → {@link McAccess#isPhysicalRmbDown()} (LWJGL button 1)</li>
- *   <li>any other index → {@code false}</li>
- * </ul>
+ * {@link ClientBootstrap} (LWJGL LMB) and {@link Mc} (LWJGL RMB, vanilla
+ * {@code sendUseItem}).
  */
 public final class Keybinds {
 
@@ -29,44 +22,40 @@ public final class Keybinds {
         if (button == 0)
             return ClientBootstrap.isLeftMouseDown();
         if (button == 1)
-            return McAccess.isPhysicalRmbDown();
+            return Mc.isPhysicalRmbDown();
         return false;
     }
 
     public boolean isForwardDown() {
-        return McAccess.isForwardKeyHeld();
+        return Mc.isForwardKeyHeld();
     }
 
     public boolean isBackDown() {
-        return McAccess.isBackKeyHeld();
+        return Mc.isBackKeyHeld();
     }
 
     public boolean isLeftDown() {
-        return McAccess.isLeftKeyHeld();
+        return Mc.isLeftKeyHeld();
     }
 
     public boolean isRightDown() {
-        return McAccess.isRightKeyHeld();
+        return Mc.isRightKeyHeld();
     }
 
     public boolean isMovementDown() {
-        return McAccess.isMovementKeyHeld();
+        return Mc.isMovementKeyHeld();
     }
 
     public boolean isJumpDown() {
-        return McAccess.isJumpKeyHeld();
+        return Mc.isJumpKeyHeld();
     }
 
     public boolean isSneakDown() {
-        return McAccess.isSneakKeyHeld();
+        return Mc.isSneakKeyHeld();
     }
 
-    /**
-     * Synthesize a vanilla right-click (item-use / block-place) via
-     * {@code PlayerControllerMP.sendUseItem}. Returns {@code true} if the
-     * server accepted the use, {@code false} on any failure or no held item.
-     */
+    /** Synthesize a vanilla right-click via {@code PlayerControllerMP.sendUseItem}. */
     public boolean rightClick() {
-        return McAccess.sendUseItem();
+        return Mc.sendUseItem();
     }
 }

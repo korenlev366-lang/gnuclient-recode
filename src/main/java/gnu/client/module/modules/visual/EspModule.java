@@ -5,8 +5,9 @@ import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.util.RenderHelper;
+import net.minecraft.entity.Entity;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -55,24 +56,22 @@ public final class EspModule extends Module {
     public void onTick() {
         cache.clear();
 
-        Object player = McAccess.thePlayer();
-        Object world = McAccess.theWorld();
-        if (player == null || world == null)
+        if (Mc.player() == null || Mc.world() == null)
             return;
 
-        List<?> entities = McAccess.getWorldEntitiesFiltered(world);
-        for (Object entity : entities) {
-            if (!showSelf.getValue() && entity == player)
+        Entity self = Mc.player();
+        for (Entity entity : Mc.getWorldEntitiesFiltered(Mc.world())) {
+            if (!showSelf.getValue() && entity == self)
                 continue;
 
             EntityData data = new EntityData();
-            data.lastX = McAccess.entityLastX(entity);
-            data.lastY = McAccess.entityLastY(entity);
-            data.lastZ = McAccess.entityLastZ(entity);
-            data.posX = McAccess.entityPosX(entity);
-            data.posY = McAccess.entityPosY(entity);
-            data.posZ = McAccess.entityPosZ(entity);
-            data.sneaking = McAccess.isSneaking(entity);
+            data.lastX = entity.lastTickPosX;
+            data.lastY = entity.lastTickPosY;
+            data.lastZ = entity.lastTickPosZ;
+            data.posX = entity.posX;
+            data.posY = entity.posY;
+            data.posZ = entity.posZ;
+            data.sneaking = entity.isSneaking();
             cache.add(data);
         }
     }
@@ -82,10 +81,10 @@ public final class EspModule extends Module {
         if (cache.isEmpty())
             return;
 
-        Object mc = McAccess.getMinecraft();
-        if (mc == null)
+        if (!Mc.isInGame())
             return;
-        double[] vp = McAccess.getViewerPos(mc, partialTicks);
+
+        double[] vp = Mc.getViewerPos(partialTicks);
         double rvpX = vp[0];
         double rvpY = vp[1];
         double rvpZ = vp[2];
@@ -105,9 +104,9 @@ public final class EspModule extends Module {
         RenderHelper.begin();
 
         for (EntityData data : cache) {
-            double ix = data.lastX + (data.posX - data.lastX) * partialTicks;
-            double iy = data.lastY + (data.posY - data.lastY) * partialTicks;
-            double iz = data.lastZ + (data.posZ - data.lastZ) * partialTicks;
+            double ix = Mc.lerp(data.lastX, data.posX, partialTicks);
+            double iy = Mc.lerp(data.lastY, data.posY, partialTicks);
+            double iz = Mc.lerp(data.lastZ, data.posZ, partialTicks);
 
             double rx = ix - rvpX;
             double ry = iy - rvpY;

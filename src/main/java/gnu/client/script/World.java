@@ -1,14 +1,14 @@
 package gnu.client.script;
 
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.player.EntityPlayer;
 
+import java.util.Collections;
 import java.util.List;
 
 /**
- * Script-facing {@code world} accessor — stateless singleton facade over
- * {@link McAccess}. Exposes block-state queries and the loaded entity list.
- *
- * <p>No cached world reference: each call re-resolves {@code McAccess.theWorld()}.
+ * Script-facing {@code world} accessor — stateless singleton facade over {@link Mc}.
  */
 public final class World {
 
@@ -16,40 +16,33 @@ public final class World {
 
     private World() {}
 
-    /**
-     * Block state at the given integer coords, or {@code null} if no world /
-     * reflection failure.
-     *
-     * @return the {@code IBlockState} as a raw Object
-     */
+    /** Block state at the given integer coords, or {@code null} if no world. */
     public Object getBlockAt(int x, int y, int z) {
-        Object world = McAccess.theWorld();
-        if (world == null)
-            return null;
-        return McAccess.getBlockState(world, x, y, z);
+        return Mc.getBlockState(Mc.world(), x, y, z);
     }
 
-    /**
-     * All loaded entities in the client world (filtered by AntiBot when that
-     * module is active). Returns an empty list if no world.
-     */
+    /** Loaded entities in the client world. Returns an empty list if no world. */
     public List<?> getEntities() {
-        Object world = McAccess.theWorld();
-        if (world == null)
-            return java.util.Collections.emptyList();
-        return McAccess.getWorldEntities(world);
+        if (Mc.world() == null)
+            return Collections.emptyList();
+        return Mc.getWorldEntities(Mc.world());
     }
 
     public boolean isPlayer(Object entity) {
-        return McAccess.isEntityPlayer(entity);
+        return Mc.isEntityPlayer(asEntity(entity));
     }
 
     public double distanceTo(Object entity) {
-        return McAccess.distanceToPlayer(entity);
+        return Mc.distanceToPlayer(asEntity(entity));
     }
 
     /** Nearest other player within {@code range} blocks, or {@code null}. */
     public Object getNearestPlayer(double range) {
-        return McAccess.getNearestPlayer(range);
+        EntityPlayer nearest = Mc.getNearestPlayer(range);
+        return nearest;
+    }
+
+    private static Entity asEntity(Object entity) {
+        return entity instanceof Entity ? (Entity) entity : null;
     }
 }

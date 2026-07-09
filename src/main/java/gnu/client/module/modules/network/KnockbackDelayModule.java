@@ -6,13 +6,19 @@ import gnu.client.module.ModuleManager;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.ClientBootstrap;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.InboundLagCoordinator;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
 import gnu.client.runtime.packet.OutboundLagQueue;
 import gnu.client.runtime.packet.PacketUtil;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.multiplayer.WorldClient;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.util.MovingObjectPosition;
 
 /**
  * raven-bS {@code KnockbackDelay} — uniform inbound freeze ({@code UnifiedLagHandler} semantics).
@@ -76,10 +82,9 @@ public final class KnockbackDelayModule extends Module implements PacketListener
         if (!isEnabled())
             return;
 
-        Object mc = McAccess.getMinecraft();
-        Object player = McAccess.thePlayer(mc);
-        Object world = McAccess.theWorld(mc);
-        if (player == null || world == null || McAccess.getBool(player, "field_70128_L")) {
+        EntityPlayerSP player = Mc.player();
+        WorldClient world = Mc.world();
+        if (player == null || world == null || player.isDead) {
             flushInboundAndClear();
             return;
         }
@@ -110,14 +115,11 @@ public final class KnockbackDelayModule extends Module implements PacketListener
             return false;
         }
 
-        Object player = McAccess.thePlayer(McAccess.getMinecraft());
-        Object world = McAccess.theWorld(McAccess.getMinecraft());
+        EntityPlayerSP player = Mc.player();
+        WorldClient world = Mc.world();
 
         if (PacketHelper.isEntityVelocity(packet) && player != null
-                && PacketHelper.velocityEntityId(packet) == McAccess.entityId(player)) {
-            // Always flush Lagrange outbound queue on self-S12 — even during an active session.
-            // Every knockback changes the player's position, and stale C03s from Lagrange's queue
-            // still being dribbled out would cause position desync and anticheat flags.
+                && PacketHelper.velocityEntityId(packet) == Mc.entityId(player)) {
             flushLagrangeIfEnabled();
             if (!sessionActive) {
                 if (conditionsFailureReason(player, world) != null)
@@ -142,7 +144,7 @@ public final class KnockbackDelayModule extends Module implements PacketListener
         InboundLagCoordinator.tryAcquire(InboundLagCoordinator.Owner.KNOCKBACK_DELAY);
     }
 
-    private String conditionsFailureReason(Object player, Object world) {
+    private String conditionsFailureReason(EntityPlayerSP player, WorldClient world) {
         if (player == null || world == null)
             return "null";
 
@@ -150,7 +152,7 @@ public final class KnockbackDelayModule extends Module implements PacketListener
         if (findTargetInRange(player, world, maxSq) == null)
             return "no target";
 
-        if (inAir.getValue() && McAccess.getBool(player, "field_70122_E"))
+        if (inAir.getValue() && player.onGround)
             return "on ground";
 
         if (lookingAtPlayer.getValue() && getMouseOverTarget(player, world, maxSq) == null)
@@ -181,33 +183,29 @@ public final class KnockbackDelayModule extends Module implements PacketListener
             ((LagrangeModule) lag).flushQueueNow();
     }
 
-    private Object getMouseOverTarget(Object player, Object world, double maxRangeSq) {
-        Object mop = McAccess.objectMouseOver();
+    private EntityPlayer getMouseOverTarget(EntityPlayerSP player, WorldClient world, double maxRangeSq) {
+        MovingObjectPosition mop = Mc.objectMouseOver();
         if (mop == null)
             return null;
-        Object hit = McAccess.getObject(mop, "field_72308_g");
-        if (hit == null || hit == player || !isPlayerEntity(hit))
+        Entity hit = mop.entityHit;
+        if (hit == null || hit == player || !(hit instanceof EntityPlayer))
             return null;
-        if (McAccess.getInt(hit, "field_70725_aQ") > 0)
+        if (hit instanceof EntityLivingBase && ((EntityLivingBase) hit).hurtTime > 0)
             return null;
-        return eyeToAabbDistSq(player, hit) <= maxRangeSq ? hit : null;
+        return eyeToAabbDistSq(player, hit) <= maxRangeSq ? (EntityPlayer) hit : null;
     }
 
-    private Object findTargetInRange(Object player, Object world, double maxRangeSq) {
-        Object mouseTarget = getMouseOverTarget(player, world, maxRangeSq);
+    private EntityPlayer findTargetInRange(EntityPlayerSP player, WorldClient world, double maxRangeSq) {
+        EntityPlayer mouseTarget = getMouseOverTarget(player, world, maxRangeSq);
         if (mouseTarget != null)
             return mouseTarget;
 
-        Object list = McAccess.getObject(world, "field_73010_i");
-        if (!(list instanceof Iterable))
-            return null;
-
-        Object best = null;
+        EntityPlayer best = null;
         double bestSq = Double.MAX_VALUE;
-        for (Object entity : (Iterable<?>) list) {
-            if (entity == null || entity == player || !isPlayerEntity(entity))
+        for (EntityPlayer entity : world.playerEntities) {
+            if (entity == null || entity == player)
                 continue;
-            if (McAccess.getInt(entity, "field_70725_aQ") > 0)
+            if (entity.hurtTime > 0)
                 continue;
             double distSq = eyeToAabbDistSq(player, entity);
             if (distSq > maxRangeSq || distSq >= bestSq)
@@ -218,15 +216,15 @@ public final class KnockbackDelayModule extends Module implements PacketListener
         return best;
     }
 
-    private static double eyeToAabbDistSq(Object player, Object entity) {
-        double px = McAccess.getDouble(player, "field_70165_t");
-        double py = McAccess.getDouble(player, "field_70163_u") + McAccess.getFloat(player, "field_70131_O") * 0.85;
-        double pz = McAccess.getDouble(player, "field_70161_v");
-        double ex = McAccess.getDouble(entity, "field_70165_t");
-        double ey = McAccess.getDouble(entity, "field_70163_u");
-        double ez = McAccess.getDouble(entity, "field_70161_v");
-        double halfW = McAccess.getFloat(entity, "field_70130_N") * 0.5f;
-        double h = McAccess.getFloat(entity, "field_70131_O");
+    private static double eyeToAabbDistSq(Entity player, Entity entity) {
+        double px = player.posX;
+        double py = player.posY + player.height * 0.85;
+        double pz = player.posZ;
+        double ex = entity.posX;
+        double ey = entity.posY;
+        double ez = entity.posZ;
+        double halfW = entity.width * 0.5f;
+        double h = entity.height;
         double cx = clamp(px, ex - halfW, ex + halfW);
         double cy = clamp(py, ey, ey + h);
         double cz = clamp(pz, ez - halfW, ez + halfW);
@@ -239,15 +237,4 @@ public final class KnockbackDelayModule extends Module implements PacketListener
     private static double clamp(double v, double min, double max) {
         return Math.max(min, Math.min(max, v));
     }
-
-    private static boolean isPlayerEntity(Object entity) {
-        Class<?> c = entity.getClass();
-        while (c != null) {
-            if (c.getName().contains("EntityPlayer"))
-                return true;
-            c = c.getSuperclass();
-        }
-        return false;
-    }
-
 }

@@ -1,14 +1,27 @@
 package gnu.client.module.modules.visual;
 
+import gnu.client.mixin.impl.accessors.IAccessorC03PacketPlayer;
+import gnu.client.mixin.impl.accessors.IAccessorGameSettings;
+import gnu.client.mixin.impl.accessors.IAccessorMinecraft;
+import gnu.client.mixin.impl.accessors.IAccessorRenderManager;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.renderer.EntityRenderer;
+import net.minecraft.client.renderer.RenderGlobal;
+import net.minecraft.client.renderer.entity.RenderManager;
+import net.minecraft.entity.Entity;
+import net.minecraft.network.play.client.C03PacketPlayer;
+import net.minecraft.util.MouseHelper;
+import org.lwjgl.input.Keyboard;
 
 /**
  * Free Look — Path B: no rotation writes, Mixin redirects orientCamera reads.
@@ -46,24 +59,6 @@ public final class FreeLookModule extends Module implements PacketListener {
 
     // Default LWJGL key code for 'L' = 56 (same as Raven)
     private static final int DEFAULT_KEY = 56;
-
-    // SRG field names (MCP 1.8.9 stable_22)
-    private static final String FIELD_ROTATION_YAW = "field_70177_z";
-    private static final String FIELD_ROTATION_PITCH = "field_70125_A";
-    private static final String FIELD_THIRD_PERSON_VIEW = "field_74320_O";
-    private static final String FIELD_FOV_SETTING = "field_74334_X";
-
-    // Minecraft.mouseHelper SRG (only used by resetPerspective for grabMouseCursor)
-    private static final String FIELD_MOUSE_HELPER = "field_71417_B";
-
-    // C03PacketPlayer SRG field names (for packet interceptor)
-    private static final String FIELD_C03_YAW = "field_149476_e";
-    private static final String FIELD_C03_PITCH = "field_149473_f";
-
-    // RenderGlobal SRG (for setDisplayListEntitiesDirty)
-    private static final String FIELD_RENDER_GLOBAL = "field_71437_Z";
-    // EntityRenderer SRG method for loadEntityShader
-    private static final String METHOD_LOAD_ENTITY_SHADER = "func_175022_a";
 
     // ── Settings (mirrors Raven Freelook.java) ────────────────────────────
 
@@ -207,7 +202,7 @@ public final class FreeLookModule extends Module implements PacketListener {
             return;
         }
 
-        if (McAccess.currentScreen(McAccess.getMinecraft()) != null && hold.getValue()) {
+        if (Mc.currentScreen() != null && hold.getValue()) {
             resetPerspective();
             setEnabled(false);
             return;
@@ -260,13 +255,12 @@ public final class FreeLookModule extends Module implements PacketListener {
 
     @Override
     public boolean onSend(Object packet) {
-        if (perspectiveToggled && PacketHelper.isPlayerMovement(packet)) {
-            Object player = McAccess.thePlayer();
+        if (perspectiveToggled && PacketHelper.isPlayerMovement(packet) && packet instanceof C03PacketPlayer) {
+            EntityPlayerSP player = Mc.player();
             if (player != null) {
-                float realYaw = McAccess.getFloat(player, FIELD_ROTATION_YAW);
-                float realPitch = McAccess.getFloat(player, FIELD_ROTATION_PITCH);
-                McAccess.setFloat(packet, FIELD_C03_YAW, realYaw);
-                McAccess.setFloat(packet, FIELD_C03_PITCH, realPitch);
+                IAccessorC03PacketPlayer c03 = (IAccessorC03PacketPlayer) packet;
+                c03.setYaw(player.rotationYaw);
+                c03.setPitch(player.rotationPitch);
             }
         }
         return false;
@@ -284,12 +278,11 @@ public final class FreeLookModule extends Module implements PacketListener {
         if (!perspectiveToggled)
             return;
 
-        Object renderManager = McAccess.getRenderManager();
+        RenderManager renderManager = Mc.renderManager();
         if (renderManager != null) {
-            // playerViewY = camera yaw (horizontal) — SRG field_78735_i
-            McAccess.setFloat(renderManager, "field_78735_i", cameraYaw);
-            // playerViewX = camera pitch (vertical) — SRG field_78732_j
-            McAccess.setFloat(renderManager, "field_78732_j", cameraPitch);
+            IAccessorRenderManager arm = (IAccessorRenderManager) renderManager;
+            arm.setPlayerViewY(cameraYaw);
+            arm.setPlayerViewX(cameraPitch);
         }
     }
 
@@ -317,12 +310,7 @@ public final class FreeLookModule extends Module implements PacketListener {
         if (code < 0)
             return false;
         try {
-            ClassLoader cl = McAccess.gameLoader();
-            if (cl == null)
-                return false;
-            Class<?> keyboard = Class.forName("org.lwjgl.input.Keyboard", false, cl);
-            Object result = keyboard.getMethod("isKeyDown", int.class).invoke(null, code);
-            return result instanceof Boolean && (Boolean) result;
+            return Keyboard.isKeyDown(code);
         } catch (Throwable ignored) {
             return false;
         }
@@ -332,7 +320,7 @@ public final class FreeLookModule extends Module implements PacketListener {
 
     /** Can we enter freelook right now? (Raven: nullCheck + Freecam guard) */
     private boolean canFreelook() {
-        if (!McAccess.isInGame())
+        if (!Mc.isInGame())
             return false;
         Module freecam = ModuleManager.INSTANCE.getModule("Freecam");
         if (freecam != null && freecam.isEnabled())
@@ -362,12 +350,11 @@ public final class FreeLookModule extends Module implements PacketListener {
         applyThirdPersonView(previousPerspective);
 
         // Raven: grab mouse cursor if in-game and no screen
-        Object mc = McAccess.getMinecraft();
-        if (mc != null && McAccess.currentScreen(mc) == null && McAccess.isInGame()) {
+        if (Mc.currentScreen() == null && Mc.isInGame()) {
             try {
-                Object mouseHelper = McAccess.getObject(mc, FIELD_MOUSE_HELPER);
+                MouseHelper mouseHelper = Mc.accessor().getMouseHelper();
                 if (mouseHelper != null) {
-                    mouseHelper.getClass().getMethod("grabMouseCursor").invoke(mouseHelper);
+                    mouseHelper.grabMouseCursor();
                 }
             } catch (Throwable t) {
                 // ignore
@@ -391,69 +378,53 @@ public final class FreeLookModule extends Module implements PacketListener {
 
         setThirdPersonView(view);
 
-        Object mc = McAccess.getMinecraft();
+        Minecraft mc = Mc.mc();
         if (mc != null) {
-            Object entityRenderer = McAccess.getObject(mc, "field_71460_t");
+            IAccessorMinecraft accessor = Mc.accessor();
+            EntityRenderer entityRenderer = accessor.getEntityRenderer();
             if (entityRenderer != null) {
                 if (view == 0) {
-                    Object rve = McAccess.renderViewEntity();
+                    Entity rve = Mc.renderViewEntity();
                     if (rve != null) {
-                        McAccess.invoke(entityRenderer, METHOD_LOAD_ENTITY_SHADER,
-                                new Class<?>[] { rve.getClass() }, rve);
+                        entityRenderer.loadEntityShader(rve);
                     }
                 } else if (view == 1) {
-                    McAccess.invoke(entityRenderer, METHOD_LOAD_ENTITY_SHADER,
-                            new Class<?>[] { Object.class }, new Object[] { null });
+                    entityRenderer.loadEntityShader(null);
                 }
             }
 
-            Object renderGlobal = McAccess.getObject(mc, FIELD_RENDER_GLOBAL);
+            RenderGlobal renderGlobal = accessor.getRenderGlobal();
             if (renderGlobal != null) {
-                try {
-                    renderGlobal.getClass().getMethod("setDisplayListEntitiesDirty")
-                            .invoke(renderGlobal);
-                } catch (Throwable t) {
-                    McAccess.invoke(renderGlobal, "func_174982_b", new Class<?>[0]);
-                }
+                renderGlobal.setDisplayListEntitiesDirty();
             }
         }
     }
 
-    // ── Reflection helpers ────────────────────────────────────────────────
+    // ── Typed helpers ─────────────────────────────────────────────────────
 
     private float getPlayerYaw() {
-        Object player = McAccess.thePlayer();
-        if (player == null) return 0f;
-        return McAccess.getFloat(player, FIELD_ROTATION_YAW);
+        EntityPlayerSP player = Mc.player();
+        return player != null ? player.rotationYaw : 0f;
     }
 
     private float getPlayerPitch() {
-        Object player = McAccess.thePlayer();
-        if (player == null) return 0f;
-        return McAccess.getFloat(player, FIELD_ROTATION_PITCH);
+        EntityPlayerSP player = Mc.player();
+        return player != null ? player.rotationPitch : 0f;
     }
 
     private int getThirdPersonView() {
-        Object settings = McAccess.gameSettings();
-        if (settings == null) return 0;
-        return McAccess.getInt(settings, FIELD_THIRD_PERSON_VIEW);
+        return ((IAccessorGameSettings) Mc.settings()).getThirdPersonView();
     }
 
     private void setThirdPersonView(int view) {
-        Object settings = McAccess.gameSettings();
-        if (settings == null) return;
-        McAccess.setInt(settings, FIELD_THIRD_PERSON_VIEW, view);
+        ((IAccessorGameSettings) Mc.settings()).setThirdPersonView(view);
     }
 
     private float getFovSetting() {
-        Object settings = McAccess.gameSettings();
-        if (settings == null) return 90f;
-        return McAccess.getFloat(settings, FIELD_FOV_SETTING);
+        return ((IAccessorGameSettings) Mc.settings()).getFovSetting();
     }
 
     private void setFovSetting(float value) {
-        Object settings = McAccess.gameSettings();
-        if (settings == null) return;
-        McAccess.setFloat(settings, FIELD_FOV_SETTING, value);
+        ((IAccessorGameSettings) Mc.settings()).setFovSetting(value);
     }
 }

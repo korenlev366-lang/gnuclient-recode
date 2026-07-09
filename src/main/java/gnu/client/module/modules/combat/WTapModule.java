@@ -7,10 +7,18 @@ import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.ClientBootstrap;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.multiplayer.WorldClient;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.util.FoodStats;
+import net.minecraft.block.material.Material;
+import net.minecraft.util.MovementInput;
 
 import java.util.Arrays;
 import java.util.List;
@@ -19,7 +27,7 @@ import java.util.List;
  * WTap / SuperKnockback — three modes ported from LiquidBounce + Raven.
  *
  * <p><b>Packet</b> (SuperKnockback): On attack, sends C0B EntityAction sprint
- * stop/start burst directly to the server via {@link McAccess#sendSprintActionPacket}.
+ * stop/start burst directly to the server via {@link Mc#sendSprintActionPacket}.
  * Each {stop,start} pair forces the server to recalculate knockback, producing
  * maximum KB regardless of client-side sprint state. Default 3 bursts =
  * stop→start→stop→start→stop→start (6 C0B packets).</p>
@@ -101,8 +109,8 @@ public final class WTapModule extends Module implements PacketListener {
     private int sprintTapBlockTicks;
 
     // World/player change guard
-    private Object lastPlayer;
-    private Object lastWorld;
+    private Entity lastPlayer;
+    private WorldClient lastWorld;
 
     public WTapModule() {
         super("W Tap", "Resets sprint to increase knockback (SuperKnockback)", Category.COMBAT);
@@ -138,7 +146,8 @@ public final class WTapModule extends Module implements PacketListener {
             return;
         if (!wtap.isEnabled() || !wtap.stopForward || movInput == null)
             return;
-        McAccess.setFloat(movInput, "field_78902_a", 0.0f);
+        MovementInput input = (MovementInput) movInput;
+        input.moveForward = 0.0f;
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
@@ -191,7 +200,7 @@ public final class WTapModule extends Module implements PacketListener {
         if (!isEnabled())
             return;
 
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null) {
             clearState();
             return;
@@ -205,7 +214,7 @@ public final class WTapModule extends Module implements PacketListener {
         }
     }
 
-    private void tickLegit(Object player) {
+    private void tickLegit(EntityPlayerSP player) {
         if (!active)
             return;
 
@@ -226,8 +235,8 @@ public final class WTapModule extends Module implements PacketListener {
     }
 
     private void checkWorldOrPlayerChange() {
-        Object player = McAccess.thePlayer();
-        Object world = McAccess.theWorld();
+        EntityPlayerSP player = Mc.player();
+        WorldClient world = Mc.world();
         if (player == null || world == null) {
             clearState();
             return;
@@ -264,44 +273,36 @@ public final class WTapModule extends Module implements PacketListener {
      * Called from CombatAttackNotify and ClientEventListener on Forge
      * AttackEntityEvent.
      */
-    public void noteForgeAttack(Object target) {
+    public void noteForgeAttack(Entity target) {
         tryBeginSequence(target);
     }
 
-    private void tryBeginSequence(Object target) {
+    private void tryBeginSequence(Entity target) {
         if (!isEnabled() || target == null || active)
             return;
-        if (!isLivingAttackTarget(target))
+        if (!(target instanceof EntityLivingBase))
             return;
 
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null || target == player)
             return;
 
-        // ── Condition gates ────────────────────────────────────────────────
-
-        // Players-only filter
-        if (playersOnly.getValue()) {
-            Class<?> playerCls = McAccess.gameClass("net.minecraft.entity.player.EntityPlayer");
-            if (playerCls == null || !playerCls.isInstance(target))
-                return;
-        }
+        if (playersOnly.getValue() && !(target instanceof EntityPlayer))
+            return;
 
         if (condMousePressed.getValue() && !ClientBootstrap.isLeftMouseDown())
             return;
 
-        if (condDamage.getValue() && McAccess.getInt(player, "field_70737_aN") <= 0)
+        if (condDamage.getValue() && player.hurtTime <= 0)
             return;
 
-        if (condFalling.getValue() && McAccess.getFloat(player, "field_70143_R") <= 0.0f)
+        if (condFalling.getValue() && player.fallDistance <= 0.0f)
             return;
 
-        if (disableInWater.getValue() && isInWater(player))
+        if (disableInWater.getValue() && player.isInWater())
             return;
 
-        // HurtTime check on target (LiquidBounce: only fire if target is
-        // vulnerable — hurtTime <= hurtTime setting)
-        int targetHurtTime = McAccess.getInt(target, "field_70725_aQ");
+        int targetHurtTime = ((EntityLivingBase) target).deathTime;
         if (targetHurtTime > hurtTime.getValue().intValue())
             return;
 
@@ -316,13 +317,12 @@ public final class WTapModule extends Module implements PacketListener {
 
         // Backward-only gate
         if (backwardOnly.getValue()) {
-            Object movInput = movementInput(player);
-            if (movInput != null && McAccess.getFloat(movInput, "field_78902_a") >= 0f)
+            MovementInput movInput = player.movementInput;
+            if (movInput != null && movInput.moveForward >= 0f)
                 return;
         }
 
-        // Same-tick dedup
-        int tick = McAccess.getInt(player, "field_70173_aa");
+        int tick = player.ticksExisted;
         if (tick == lastAttackTick)
             return;
         lastAttackTick = tick;
@@ -350,23 +350,19 @@ public final class WTapModule extends Module implements PacketListener {
      * Packet mode (SuperKnockback — LiquidBounce).
      *
      * Sends {stop→start}×bursts C0B EntityAction packets directly to the
-     * server via {@link McAccess#sendSprintActionPacket}. Each pair forces
+     * server via {@link Mc#sendSprintActionPacket}. Each pair forces
      * the server to recalculate knockback for the hit.
      *
      * LiquidBounce uses 3 bursts: stop→start→stop→start→stop→start.
      * After the burst, restores client sprint flags so the local player
      * visually stays sprinting.
      */
-    private void doPacketBurst(Object player) {
+    private void doPacketBurst(EntityPlayerSP player) {
         if (player == null)
             return;
 
-        // Save sprint flags for restore
-        boolean wasClientSprinting = McAccess.isClientSprinting(player);
-        boolean wasServerSprinting = McAccess.getServerSprintState(player);
-
-        // Save wasSprinting field too (field_20052_b in 1.8.9)
-        boolean wasWasSprinting = McAccess.getBool(player, "field_20052_b");
+        boolean wasClientSprinting = Mc.isClientSprinting(player);
+        boolean wasServerSprinting = Mc.getServerSprintState(player);
 
         int bursts = packetBursts.getValue().intValue();
         if (bursts < 1)
@@ -374,40 +370,24 @@ public final class WTapModule extends Module implements PacketListener {
         if (bursts > 6)
             bursts = 6;
 
-        // Send the sprint toggle sequence: stop→start × bursts
-        // Each pair triggers knockback recalculation
         for (int i = 0; i < bursts; i++) {
-            McAccess.sendSprintActionPacket(player, false); // STOP_SPRINTING
-            McAccess.sendSprintActionPacket(player, true);  // START_SPRINTING
+            Mc.sendSprintActionPacket(player, false);
+            Mc.sendSprintActionPacket(player, true);
         }
 
-        // Restore client-side sprint state so the local player doesn't
-        // appear to stop sprinting
         if (packetRestoreSprint.getValue()) {
-            McAccess.setClientSprinting(player, wasClientSprinting);
-            McAccess.setBool(player, "field_20052_b", wasWasSprinting);
-            // Server state needs to be set back too since sendSprintActionPacket
-            // mirrors to serverSprintState
-            McAccess.setServerSprintState(player, wasServerSprinting);
+            Mc.setClientSprinting(player, wasClientSprinting);
+            Mc.setServerSprintState(player, wasServerSprinting);
         }
 
         active = true;
     }
 
-    /**
-     * SprintTap mode (Raven style).
-     *
-     * Sends one C0B STOP_SPRINTING immediately on attack, then blocks
-     * the client sprint key for (delay + wait) ticks. During the block
-     * window, SprintModule releases the sprint keybind, so the next
-     * movement tick sends the natural C0B stop.
-     */
-    private void doSprintTap(Object player) {
+    private void doSprintTap(EntityPlayerSP player) {
         if (player == null)
             return;
 
-        // Send immediate C0B STOP_SPRINTING
-        McAccess.sendSprintActionPacket(player, false);
+        Mc.sendSprintActionPacket(player, false);
 
         // Block sprint for the combined delay+wait duration
         active = true;
@@ -431,63 +411,32 @@ public final class WTapModule extends Module implements PacketListener {
 
     // ── Legit-mode helpers ────────────────────────────────────────────────
 
-    private boolean canTrigger(Object player) {
-        Object movInput = movementInput(player);
-        if (movInput != null && McAccess.getFloat(movInput, "field_78902_a") < FORWARD_STOP_THRESHOLD)
+    private boolean canTrigger(EntityPlayerSP player) {
+        MovementInput movInput = player.movementInput;
+        if (movInput != null && movInput.moveForward < FORWARD_STOP_THRESHOLD)
             return false;
 
-        if (McAccess.getBool(player, "field_70134_J"))
+        if (player.isInsideOfMaterial(Material.web))
             return false;
 
         if (!hasSprintFood(player))
             return false;
 
         if (legitSprintingOnly.getValue()) {
-            if (!McAccess.isClientSprinting(player))
+            if (!Mc.isClientSprinting(player))
                 return false;
         }
 
-        return McAccess.isClientSprinting(player) || McAccess.isKeyBindDown("field_151444_V");
+        return Mc.isClientSprinting(player)
+                || Mc.settings().keyBindSprint.isKeyDown();
     }
 
-    private static boolean hasSprintFood(Object player) {
-        Object food = McAccess.invoke(player, "func_71024_bL", new Class<?>[0]);
+    private static boolean hasSprintFood(EntityPlayer player) {
+        FoodStats food = player.getFoodStats();
         if (food == null)
             return true;
-        Object level = McAccess.invoke(food, "func_75116_a", new Class<?>[0]);
-        if (level instanceof Integer) {
-            Object caps = McAccess.getObject(player, "field_71075_bZ");
-            if (caps != null && McAccess.getBool(caps, "field_75101_c"))
-                return true;
-            return (Integer) level > 6;
-        }
-        return true;
-    }
-
-    // ── Utility ───────────────────────────────────────────────────────────
-
-    private static Object movementInput(Object player) {
-        Object movInput = McAccess.getObject(player, "field_71158_b");
-        if (movInput == null)
-            movInput = McAccess.getObject(player, "field_71158_b");
-        return movInput;
-    }
-
-    private static boolean isLivingAttackTarget(Object entity) {
-        if (entity == null)
-            return false;
-        Class<?> c = entity.getClass();
-        while (c != null) {
-            String name = c.getName();
-            if (name.contains("EntityLivingBase") || name.contains("EntityPlayer"))
-                return true;
-            c = c.getSuperclass();
-        }
-        return false;
-    }
-
-    private static boolean isInWater(Object player) {
-        Object r = McAccess.invoke(player, "func_70090_H", new Class<?>[0]);
-        return r instanceof Boolean && (Boolean) r;
+        if (player.capabilities.allowFlying)
+            return true;
+        return food.getFoodLevel() > 6;
     }
 }

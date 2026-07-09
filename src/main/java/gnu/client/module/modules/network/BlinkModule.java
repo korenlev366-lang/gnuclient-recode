@@ -5,7 +5,7 @@ import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.OutboundLagQueue;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
@@ -88,10 +88,9 @@ public final class BlinkModule extends Module implements PacketListener {
 
     @Override
     public void onRender(float partialTicks) {
-        if (!serverEsp.getValue() || outbound.isEmpty() || !McAccess.isInGame() || !frozenPosValid)
+        if (!serverEsp.getValue() || outbound.isEmpty() || !Mc.isInGame() || !frozenPosValid)
             return;
-        Object mc = McAccess.getMinecraft();
-        double[] vp = McAccess.getViewerPos(mc, partialTicks);
+        double[] vp = Mc.getViewerPos(partialTicks);
         float fr = espRed.getValue() / 255.0f;
         float fg = espGreen.getValue() / 255.0f;
         float fb = espBlue.getValue() / 255.0f;
@@ -103,15 +102,14 @@ public final class BlinkModule extends Module implements PacketListener {
     }
 
     private void freezeCurrentPosition() {
-        Object mc = McAccess.getMinecraft();
-        Object player = McAccess.thePlayer(mc);
+        net.minecraft.client.entity.EntityPlayerSP player = Mc.player();
         if (player == null) {
             frozenPosValid = false;
             return;
         }
-        frozenX = McAccess.entityPosX(player);
-        frozenY = McAccess.entityPosY(player);
-        frozenZ = McAccess.entityPosZ(player);
+        frozenX = player.posX;
+        frozenY = player.posY;
+        frozenZ = player.posZ;
         frozenPosValid = true;
     }
 

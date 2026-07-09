@@ -12,8 +12,14 @@ import gnu.client.runtime.AuraCombatPacketGuard;
 import gnu.client.runtime.CombatAttackNotify;
 import gnu.client.runtime.PlayerUpdateHook;
 import gnu.client.runtime.RotationState;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.multiplayer.WorldClient;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.scoreboard.Team;
+import net.minecraft.util.MovementInput;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -24,7 +30,7 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * OpenMyau-Plus {@code KillAura} skid, ported onto the GNUClient Forge hook
  * system (silent rotations via {@link PlayerUpdateHook} / {@link RotationState},
- * movefix via {@link MoveFixUtil}, attack packets via {@link McAccess#attackEntity}).
+ * movefix via {@link MoveFixUtil}, attack packets via {@link Mc#attackEntity}).
  *
  * <p>Target selection mirrors OpenMyau's {@code onTick} PRE block: gather
  * valid players in range, sort by the configured {@link #sort} mode, then
@@ -119,13 +125,11 @@ public final class KillAuraModule extends Module {
     // ── State ─────────────────────────────────────────────────────────────
 
     private long lastAttackMs = 0L;
-    private Object attackTarget;
+    private Entity attackTarget;
     private float lastSentYaw = Float.MIN_VALUE;
     private float lastSentPitch = Float.MIN_VALUE;
     private float pendingSentYaw = Float.MIN_VALUE;
     private float pendingSentPitch = Float.MIN_VALUE;
-    /** Blocks sprint restart same tick after aura attack (Grim BadPacketsX). */
-    private boolean attackedThisTick;
     /** OpenMyau Switch mode: bump switchTick only after a hit lands, not every timeout. */
     private boolean hitRegisteredSinceSwitch;
     private int switchTick;
@@ -153,7 +157,6 @@ public final class KillAuraModule extends Module {
         clearRotationStateIfOwned();
         attackTarget = null;
         resetRotationState();
-        attackedThisTick = false;
         AuraCombatPacketGuard.unregister();
     }
 
@@ -177,7 +180,7 @@ public final class KillAuraModule extends Module {
         return killAura.rotations.getValue() != ROT_NONE && killAura.attackTarget != null;
     }
 
-    public static Object getCurrentTarget() {
+    public static Entity getCurrentTarget() {
         Module module = ModuleManager.instance().getModule("KillAura");
         if (!(module instanceof KillAuraModule) || !module.isEnabled())
             return null;
@@ -202,26 +205,18 @@ public final class KillAuraModule extends Module {
             ((KillAuraModule) module).beforeWalkingAttack(player);
     }
 
-    /** After aura attack — block START_SPRINTING until C03 is sent (BadPacketsX). */
-    public static boolean shouldSuppressSprintRestart() {
-        Module module = ModuleManager.instance().getModule("KillAura");
-        if (!(module instanceof KillAuraModule) || !module.isEnabled())
-            return false;
-        return ((KillAuraModule) module).attackedThisTick;
-    }
-
     /**
-     * Hold sprint key off on the aura attack tick so living update / SprintModule cannot
-     * re-enable sprint before STOP/C03 (BadPacketsX). Cleared in {@link #onPostAttackTick}.
+     * OpenMyau does not suppress sprint after hits — Sprint keeps the key held and
+     * living re-sprints. Forcing walk after attack caused ground Simulation ~0.030
+     * (Grim still predicts sprint accel). Always false; kept for SprintModule API.
      */
-    public static boolean shouldSuppressSprintKey() {
-        return shouldSuppressSprintRestart();
+    public static boolean shouldSuppressSprintRestart() {
+        return false;
     }
 
-    public static void onPostAttackTick(Object player) {
-        Module module = ModuleManager.instance().getModule("KillAura");
-        if (module instanceof KillAuraModule && module.isEnabled())
-            ((KillAuraModule) module).clearPostAttackGuard();
+    /** @see #shouldSuppressSprintRestart */
+    public static boolean shouldSuppressSprintKey() {
+        return false;
     }
 
     public static void onAfterWalking(Object player) {
@@ -249,11 +244,12 @@ public final class KillAuraModule extends Module {
             || !MoveFixUtil.isForwardPressed())
             return;
 
-        boolean sneak = McAccess.getBool(movInput, "field_78899_d");
+        MovementInput input = (MovementInput) movInput;
+        boolean sneak = input.sneak;
         float[] fixed = MoveFixUtil.fixStrafe(
-            McAccess.getYaw(), RotationState.getSmoothedYaw(), sneak);
-        McAccess.setFloat(movInput, "field_78900_b", fixed[0]);
-        McAccess.setFloat(movInput, "field_78902_a", fixed[1]);
+            Mc.getYaw(), RotationState.getSmoothedYaw(), sneak);
+        input.moveForward = fixed[0];
+        input.moveStrafe = fixed[1];
     }
 
     // ── Per-tick flow ─────────────────────────────────────────────────────
@@ -262,23 +258,24 @@ public final class KillAuraModule extends Module {
         pendingSentYaw = Float.MIN_VALUE;
         pendingSentPitch = Float.MIN_VALUE;
 
-        if (player == null || !canRunCombat()) {
+        if (!(player instanceof EntityPlayerSP))
+            player = Mc.player();
+        if (!(player instanceof EntityPlayerSP) || !canRunCombat()) {
             attackTarget = null;
             clearRotationStateIfOwned();
             return;
         }
+        EntityPlayerSP sp = (EntityPlayerSP) player;
 
-        updateTarget(player);
+        updateTarget(sp);
         if (attackTarget == null) {
             clearRotationStateIfOwned();
             return;
         }
 
-        prepareRotation(player);
-        // OpenMyau UpdateEvent PRE: attack before onLivingUpdate so AttackSlow sees slowed motion.
-        // Still before C03 (Post animation 1.8 safe) — walking packet runs later this tick.
-        if (canAttackThisTick(player))
-            tryPerformAttack(player);
+        prepareRotation(sp);
+        if (canAttackThisTick(sp))
+            tryPerformAttack(sp);
     }
 
     private void afterWalking(Object player) {
@@ -299,15 +296,15 @@ public final class KillAuraModule extends Module {
 
     // ── Target selection (OpenMyau onTick PRE: gather → sort → switch) ──
 
-    private void updateTarget(Object player) {
-        Object world = McAccess.theWorld();
+    private void updateTarget(EntityPlayerSP player) {
+        WorldClient world = Mc.world();
         if (world == null) {
             attackTarget = null;
             return;
         }
 
-        List<Object> candidates = new ArrayList<>();
-        for (Object entity : McAccess.getWorldEntitiesFiltered(world)) {
+        List<Entity> candidates = new ArrayList<>();
+        for (Entity entity : Mc.getWorldEntitiesFiltered(world)) {
             if (isValidCandidate(entity, player))
                 candidates.add(entity);
         }
@@ -332,19 +329,22 @@ public final class KillAuraModule extends Module {
         if (mode.getValue() == MODE_SINGLE || switchTick >= candidates.size())
             switchTick = 0;
 
-        Object newTarget = candidates.get(switchTick);
+        Entity newTarget = candidates.get(switchTick);
         if (newTarget != attackTarget) {
             attackTarget = newTarget;
             lastSwitchMs = now;
         }
     }
 
-    private boolean isValidCandidate(Object entity, Object player) {
+    private boolean isValidCandidate(Entity entity, EntityPlayerSP player) {
         if (entity == null || entity == player)
             return false;
-        if (!McAccess.isEntityPlayer(entity))
+        if (!Mc.isEntityPlayer(entity))
             return false;
-        if (McAccess.isDead(entity) || McAccess.getDeathTime(entity) > 0)
+        if (!(entity instanceof EntityLivingBase))
+            return false;
+        EntityLivingBase living = (EntityLivingBase) entity;
+        if (Mc.isDead(entity) || Mc.getDeathTime(living) > 0)
             return false;
         if (teams.getValue() && isSameTeam(entity))
             return false;
@@ -358,7 +358,7 @@ public final class KillAuraModule extends Module {
 
         float fovVal = fov.getValue();
         if (fovVal < 360.0f) {
-            float cameraYaw = McAccess.getYaw();
+            float cameraYaw = Mc.getYaw();
             if (!RavenRotationUtils.isEyeInsideExpandedHitbox(entity)
                 && !RavenRotationUtils.inFov(cameraYaw, fovVal, RavenRotationUtils.angleToEntity(entity)))
                 return false;
@@ -366,17 +366,17 @@ public final class KillAuraModule extends Module {
         return true;
     }
 
-    private void sortCandidates(List<Object> candidates) {
-        Comparator<Object> comparator;
+    private void sortCandidates(List<Entity> candidates) {
+        Comparator<Entity> comparator;
         switch (sort.getValue()) {
             case SORT_HEALTH:
-                comparator = Comparator.comparingDouble(e -> (double) McAccess.getHealth(e));
+                comparator = Comparator.comparingDouble(e -> (double) Mc.getHealth((EntityLivingBase) e));
                 break;
             case SORT_HURTTIME:
-                comparator = Comparator.comparingInt(McAccess::getHurtTime);
+                comparator = Comparator.comparingInt(e -> Mc.getHurtTime((EntityLivingBase) e));
                 break;
             case SORT_FOV: {
-                float cameraYaw = McAccess.getYaw();
+                float cameraYaw = Mc.getYaw();
                 comparator = Comparator.comparingDouble(e -> fovDifference(cameraYaw, e));
                 break;
             }
@@ -388,24 +388,22 @@ public final class KillAuraModule extends Module {
         candidates.sort(comparator);
     }
 
-    private static double fovDifference(float cameraYaw, Object entity) {
+    private static double fovDifference(float cameraYaw, Entity entity) {
         return Math.abs(RavenRotationUtils.wrapAngleTo180(cameraYaw - RavenRotationUtils.angleToEntity(entity)));
     }
 
-    private static boolean isSameTeam(Object entity) {
-        Object player = McAccess.thePlayer();
-        if (player == null || entity == null)
+    private static boolean isSameTeam(Entity entity) {
+        EntityPlayerSP player = Mc.player();
+        if (player == null || entity == null || !(entity instanceof EntityPlayer))
             return false;
         try {
-            Object team = McAccess.invoke(entity, "func_96124_cp", new Class<?>[0]);
+            Team team = ((EntityPlayer) entity).getTeam();
             if (team == null)
                 return false;
-            Object ourTeam = McAccess.invoke(player, "func_96124_cp", new Class<?>[0]);
+            Team ourTeam = player.getTeam();
             if (ourTeam == null)
                 return false;
-            Object teamName = McAccess.invoke(team, "func_96661_b", new Class<?>[0]);
-            Object ourName = McAccess.invoke(ourTeam, "func_96661_b", new Class<?>[0]);
-            return teamName != null && ourName != null && teamName.equals(ourName);
+            return team.getRegisteredName().equals(ourTeam.getRegisteredName());
         } catch (Throwable ignored) {
             return false;
         }
@@ -413,7 +411,7 @@ public final class KillAuraModule extends Module {
 
     // ── Rotation prep ─────────────────────────────────────────────────────
 
-    private void prepareRotation(Object player) {
+    private void prepareRotation(EntityPlayerSP player) {
         int rot = rotations.getValue();
         if (rot == ROT_NONE) {
             clearRotationStateIfOwned();
@@ -432,7 +430,7 @@ public final class KillAuraModule extends Module {
         if (rawTarget == null)
             return;
 
-        EntityLivingBase entity = (EntityLivingBase) player;
+        EntityLivingBase entity = player;
         float newYaw;
         float newPitch;
         if (rot == ROT_LOCKVIEW) {
@@ -454,7 +452,7 @@ public final class KillAuraModule extends Module {
         clearRotationStateIfOwned();
     }
 
-    private void prepareSilentRotation(Object player) {
+    private void prepareSilentRotation(EntityPlayerSP player) {
         if (player == null || attackTarget == null)
             return;
 
@@ -490,13 +488,12 @@ public final class KillAuraModule extends Module {
         PlayerUpdateHook.requestRotation(sentYaw, sentPitch);
         lastSentYaw = sentYaw;
         lastSentPitch = sentPitch;
-        // OpenMyau setPervRotation only when MoveFix != NONE. Without it, smoothYaw must
-        // not be the silent yaw or moveFlying (if ever gated on isActived alone) desyncs.
-        if (moveFix.getValue() != MOVEFIX_NONE) {
-            RotationState.applyState(true, sentYaw, sentPitch, sentYaw, ROTATION_PRIORITY);
-        } else {
-            clearRotationStateIfOwned();
-        }
+        // Always apply for F5/FreeLook head. MoveFix priority only when MoveFix is on
+        // (MoveFixHook gates moveFlying on priority 1/3).
+        boolean moveFixOn = moveFix.getValue() != MOVEFIX_NONE;
+        float pervYaw = moveFixOn ? sentYaw : Mc.getYaw();
+        int priority = moveFixOn ? ROTATION_PRIORITY : -1;
+        RotationState.applyState(true, sentYaw, sentPitch, pervYaw, priority);
     }
 
     // ── Attack ────────────────────────────────────────────────────────────
@@ -522,25 +519,24 @@ public final class KillAuraModule extends Module {
         return block.isActive() && !block.isLagging();
     }
 
-    private boolean shouldSkipAttackForItemUse(Object player) {
+    private boolean shouldSkipAttackForItemUse(EntityPlayerSP player) {
         if (player == null)
             return true;
-        if (McAccess.isUsingItem(player) || McAccess.isBlocking(player))
+        if (Mc.isUsingItem(player) || Mc.isBlocking(player))
             return true;
-        // Manual sword block: RMB held — isUsingItem can lag a tick behind key state.
-        if (McAccess.isUseItemKeyDown() && McAccess.isHoldingSword())
+        if (Mc.isUseItemKeyDown() && Mc.isHoldingSword())
             return true;
         return false;
     }
 
-    private boolean canAttackThisTick(Object player) {
+    private boolean canAttackThisTick(EntityPlayerSP player) {
         if (player == null || attackTarget == null || !canRunCombat())
             return false;
-        if (requirePress.getValue() && !McAccess.isPhysicalLmbDown())
+        if (requirePress.getValue() && !Mc.isPhysicalLmbDown())
             return false;
-        if (inventoryCheck.getValue() && McAccess.currentScreen() != null)
+        if (inventoryCheck.getValue() && Mc.currentScreen() != null)
             return false;
-        if (weaponsOnly.getValue() && !McAccess.isHoldingSword())
+        if (weaponsOnly.getValue() && !Mc.isHoldingSword())
             return false;
         if (shouldSkipAttackForItemUse(player))
             return false;
@@ -558,9 +554,33 @@ public final class KillAuraModule extends Module {
         if (distSq > range * range)
             return false;
 
+        // Grim Hitboxes: look ray (yaw/pitch Grim has for this C02) must hit the box.
+        // Silent uses pending/sent look; Legit/LockView use camera. Skip for ROT_NONE.
+        if (rotations.getValue() != ROT_NONE && !lookHitsAttackTarget(player, range))
+            return false;
+
         if (HitSelectModule.shouldBlockClick())
             return false;
-        return McAccess.playerController() != null;
+        return Mc.controller() != null;
+    }
+
+    /**
+     * OpenMyau Silent/Legit gate: do not attack until the attack look ray intersects
+     * the target AABB (avoids Grim Hitboxes when rotations are still stepping).
+     */
+    private boolean lookHitsAttackTarget(EntityPlayerSP player, double range) {
+        if (attackTarget == null || player == null)
+            return false;
+        float yaw;
+        float pitch;
+        if (rotations.getValue() == ROT_SILENT && pendingSentYaw != Float.MIN_VALUE) {
+            yaw = pendingSentYaw;
+            pitch = pendingSentPitch;
+        } else {
+            yaw = player.rotationYaw;
+            pitch = player.rotationPitch;
+        }
+        return RavenRotationUtils.looksAtHitbox(attackTarget, yaw, pitch, range);
     }
 
     private long getAttackDelayMs() {
@@ -575,42 +595,37 @@ public final class KillAuraModule extends Module {
         return 1000L / cps;
     }
 
-    private void tryPerformAttack(Object player) {
+    private void tryPerformAttack(EntityPlayerSP player) {
         if (!canAttackThisTick(player))
             return;
 
         notifyPreAttackHooks(attackTarget);
 
-        boolean wasClientSprinting = McAccess.isClientSprinting(player);
-        boolean wasServerSprinting = McAccess.getServerSprintState(player);
-
         float savedYaw = 0f;
         float savedPitch = 0f;
         boolean useSilentAim = rotations.getValue() == ROT_SILENT && pendingSentYaw != Float.MIN_VALUE;
         if (useSilentAim) {
-            savedYaw = McAccess.getFloat(player, "field_70177_z");
-            savedPitch = McAccess.getFloat(player, "field_70125_A");
-            McAccess.setFloat(player, "field_70177_z", pendingSentYaw);
-            McAccess.setFloat(player, "field_70125_A", pendingSentPitch);
+            savedYaw = player.rotationYaw;
+            savedPitch = player.rotationPitch;
+            player.rotationYaw = pendingSentYaw;
+            player.rotationPitch = pendingSentPitch;
         }
 
         boolean swing = !shouldDeferSwingToAutoBlock();
-        boolean attacked = McAccess.attackEntity(attackTarget, swing);
+        boolean attacked = Mc.attackEntity(attackTarget, swing);
 
         if (useSilentAim) {
-            McAccess.setFloat(player, "field_70177_z", savedYaw);
-            McAccess.setFloat(player, "field_70125_A", savedPitch);
+            player.rotationYaw = savedYaw;
+            player.rotationPitch = savedPitch;
         }
 
         if (!attacked)
             return;
 
-        attackedThisTick = true;
+        // OpenMyau: vanilla/PlayerUtil applies motion*=0.6 + setSprinting(false) when
+        // sprinting. Do NOT clear the sprint key or suppress re-sprint — living must
+        // re-apply sprint accel on ground or Grim predicts +0.03 (Simulation sawtooth).
         hitRegisteredSinceSwitch = true;
-        // Do not force sprint key off here — fights SprintModule and causes BadPacketsX
-        // (STOP/START churn) under knockback. AuraCombatPacketGuard + shouldSuppressSprintRestart
-        // already block START until after C03; vanilla attack clears client sprint when needed.
-        McAccess.reconcileVanillaAttackSlowdown(player, wasClientSprinting, wasServerSprinting);
 
         lastAttackMs = System.currentTimeMillis();
         AimAssistModule.lastClickMs = lastAttackMs;
@@ -619,11 +634,7 @@ public final class KillAuraModule extends Module {
             patternIndex = (patternIndex + 1) % CLICK_PATTERN.length;
     }
 
-    private void clearPostAttackGuard() {
-        attackedThisTick = false;
-    }
-
-    private static void notifyPreAttackHooks(Object target) {
+    private static void notifyPreAttackHooks(Entity target) {
         CombatAttackNotify.noteAttack(target);
         Module lagrange = ModuleManager.INSTANCE.getModule("Lagrange");
         if (lagrange instanceof LagrangeModule && lagrange.isEnabled())
@@ -640,9 +651,7 @@ public final class KillAuraModule extends Module {
     // ── Shared guards ─────────────────────────────────────────────────────
 
     private boolean canRunCombat() {
-        Object player = McAccess.thePlayer();
-        Object world = McAccess.theWorld();
-        if (player == null || world == null)
+        if (Mc.player() == null || Mc.world() == null)
             return false;
 
         Module autoClicker = ModuleManager.INSTANCE.getModule("AutoClicker");
@@ -653,7 +662,9 @@ public final class KillAuraModule extends Module {
     }
 
     private void clearRotationStateIfOwned() {
-        if (RotationState.getPriority() == ROTATION_PRIORITY)
+        // KA MoveFix = 1; KA render-only = -1. Do not clear Scaffold (-3 / 3).
+        int p = (int) RotationState.getPriority();
+        if (p == ROTATION_PRIORITY || p == -1)
             RotationState.reset();
     }
 

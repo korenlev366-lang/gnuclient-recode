@@ -3,6 +3,7 @@ package gnu.client.helper;
 import gnu.client.event.*;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.impl.client.Settings;
+import gnu.client.runtime.MoveFixHook;
 import gnu.client.utility.RotationUtils;
 import gnu.client.utility.Utils;
 import net.minecraft.client.Minecraft;
@@ -273,6 +274,10 @@ public class RotationHelper {
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public void onPostInput(PostPlayerInputEvent event) {
+        // Yield to OpenMyau MoveFix (KillAura/Scaffold fixStrafe + moveFlying swap).
+        if (MoveFixHook.shouldUseServerMoveYaw())
+            return;
+
         if (!fixMovement()) {
             return;
         }
@@ -321,6 +326,8 @@ public class RotationHelper {
 
     @SubscribeEvent
     public void onStrafe(StrafeEvent e) {
+        if (MoveFixHook.shouldUseServerMoveYaw())
+            return;
         if (fixMovement()) {
             e.setYaw(this.serverYaw);
         }
@@ -328,6 +335,8 @@ public class RotationHelper {
 
     @SubscribeEvent
     public void onJump(JumpEvent e) {
+        if (MoveFixHook.shouldUseServerMoveYaw())
+            return;
         if (fixMovement()) {
             e.setYaw(this.serverYaw);
         }

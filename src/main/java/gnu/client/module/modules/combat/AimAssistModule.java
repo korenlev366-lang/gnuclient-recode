@@ -5,9 +5,21 @@ import gnu.client.module.Module;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.ClientBootstrap;
 import gnu.client.util.RenderHelper;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.gui.ScaledResolution;
+import net.minecraft.client.multiplayer.WorldClient;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.item.ItemAxe;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.ItemSword;
+import net.minecraft.util.AxisAlignedBB;
+import net.minecraft.util.MovingObjectPosition;
+import net.minecraft.util.Vec3;
 import org.lwjgl.opengl.GL11;
 
 import java.util.ArrayList;
@@ -82,11 +94,11 @@ public final class AimAssistModule extends Module {
     // ==================== State ====================
 
     /** Current locked target (persists across ticks for Single mode / TargetSwitchDelay). */
-    private Object lockedTarget;
+    private Entity lockedTarget;
     /** Wall-clock ms of the last target switch, for TargetSwitchDelay. */
     private long lastTargetSwitchMs;
     /** The entity we are currently aiming at (may be null). */
-    private Object currentTarget;
+    private Entity currentTarget;
     /** Whether we have an active aim target this tick. */
     private boolean hasTarget;
 
@@ -146,15 +158,14 @@ public final class AimAssistModule extends Module {
             return;
         }
 
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null) {
             hasTarget = false;
             return;
         }
         RavenRotationUtils.beginTick(player);
 
-        // === Target selection (Timewarp TargetHandler) ===
-        Object candidate = selectTarget();
+        Entity candidate = selectTarget();
         if (candidate == null) {
             currentTarget = null;
             hasTarget = false;
@@ -200,8 +211,8 @@ public final class AimAssistModule extends Module {
         // so manual mouse input feeds into aim smoothing directly.
         // Without this, internal smoothYaw/smoothPitch overwrite user input,
         // creating "sticky" resistance even at low speed settings.
-        float baseYaw = McAccess.getFloat(player, "field_70177_z");
-        float basePitch = McAccess.getFloat(player, "field_70125_A");
+        float baseYaw = player.rotationYaw;
+        float basePitch = player.rotationPitch;
         double mp = aimMode.getValue() == 1 ? multipointOffset.getValue() : 0.0;
         boolean blockWalls = !throughWalls.getValue();
         float[] rawTarget = RavenRotationUtils.getRawRotationsToTarget(
@@ -224,8 +235,8 @@ public final class AimAssistModule extends Module {
         float newPitch = result[1];
 
         // Write rotation to player entity
-        McAccess.setFloat(player, "field_70177_z", newYaw);
-        McAccess.setFloat(player, "field_70125_A", newPitch);
+        player.rotationYaw = newYaw;
+        player.rotationPitch = newPitch;
 
     }
 
@@ -234,10 +245,10 @@ public final class AimAssistModule extends Module {
     @Override
     public void onRender(float partialTicks) {
         // Target line rendering
-        if (!isEnabled() || currentTarget == null || !targetLine.getValue() || !McAccess.isInGame())
+        if (!isEnabled() || currentTarget == null || !targetLine.getValue() || !Mc.isInGame())
             return;
 
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null)
             return;
 
@@ -247,8 +258,7 @@ public final class AimAssistModule extends Module {
         if (eye == null || aim == null)
             return;
 
-        Object mc = McAccess.getMinecraft();
-        double[] vp = McAccess.getViewerPos(mc, partialTicks);
+        double[] vp = Mc.getViewerPos(partialTicks);
         float r = targetLineColorR.getValue() / 255.0f;
         float g = targetLineColorG.getValue() / 255.0f;
         float b = targetLineColorB.getValue() / 255.0f;
@@ -265,9 +275,12 @@ public final class AimAssistModule extends Module {
     public void onOverlay(Object sr) {
         if (!isEnabled() || !visualizeFov.getValue())
             return;
+        if (!(sr instanceof ScaledResolution))
+            return;
+        ScaledResolution scaled = (ScaledResolution) sr;
 
-        int sw = invokeInt(sr, "func_78326_a");
-        int sh = invokeInt(sr, "func_78328_b");
+        int sw = scaled.getScaledWidth();
+        int sh = scaled.getScaledHeight();
         if (sw < 1 || sh < 1)
             return;
 
@@ -317,17 +330,14 @@ public final class AimAssistModule extends Module {
     // ==================== Condition helpers (Timewarp TargetHandler) ====================
 
     private boolean conditionsMet() {
-        Object mc = McAccess.getMinecraft();
-        if (mc == null)
+        if (!Mc.isResolved())
             return false;
-        if (McAccess.currentScreen(mc) != null)
+        if (Mc.currentScreen() != null)
             return false;
-
-        Object inGameHasFocus = McAccess.getObject(mc, "field_71415_G");
-        if (inGameHasFocus instanceof Boolean && !(Boolean) inGameHasFocus)
+        if (!Mc.mc().inGameHasFocus)
             return false;
 
-        Object player = McAccess.thePlayer(mc);
+        EntityPlayerSP player = Mc.player();
         if (player == null)
             return false;
 
@@ -337,41 +347,39 @@ public final class AimAssistModule extends Module {
             return false;
         if (requireRmb.getValue() && !isRightMouseDown())
             return false;
-        if (sprintingOnly.getValue() && !McAccess.isClientSprinting(player))
+        if (sprintingOnly.getValue() && !Mc.isClientSprinting(player))
             return false;
-        if (disableInWater.getValue() && isInWater(player))
+        if (disableInWater.getValue() && player.isInWater())
             return false;
-        if (checkPitch.getValue() && Math.abs(McAccess.getFloat(player, "field_70125_A")) > CHECK_PITCH_LIMIT)
+        if (checkPitch.getValue() && Math.abs(player.rotationPitch) > CHECK_PITCH_LIMIT)
             return false;
 
         return true;
     }
 
-    private boolean passesTargetFilters(Object target) {
-        Object player = McAccess.thePlayer();
+    private boolean passesTargetFilters(Entity target) {
+        EntityPlayerSP player = Mc.player();
         if (player == null || target == null)
             return false;
 
-        // Hurt time filter
         if (hurtTimeFilter.getValue()) {
-            int hurt = McAccess.getInt(target, "field_70737_aN");
+            if (!(target instanceof EntityLivingBase))
+                return false;
+            int hurt = ((EntityLivingBase) target).hurtTime;
             if (hurt < hurtTime.getValue().intValue())
                 return false;
         }
 
-        // Vertical check: limit pitch difference to target
         if (verticalCheck.getValue()) {
             float pitchDelta = (float) Math.abs(RavenRotationUtils.pitchDifference(target,
-                    McAccess.getFloat(player, "field_70125_A")));
+                    player.rotationPitch));
             if (pitchDelta > VERTICAL_CHECK_LIMIT)
                 return false;
         }
 
-        // Inside entity hitbox: only aim if player's eye is inside target's AABB
         if (insideEntityHitbox.getValue() && !isInsideTargetHitbox(player, target))
             return false;
 
-        // Require entity hit: only aim if crosshair is directly on target
         if (requireEntityHit.getValue() && !isCrosshairOnEntity(target))
             return false;
 
@@ -386,43 +394,40 @@ public final class AimAssistModule extends Module {
      * - Validates aim point (LOS / multipoint)
      * - Returns first valid candidate
      */
-    private Object selectTarget() {
-        Object player = McAccess.thePlayer();
-        Object world = McAccess.theWorld();
+    private Entity selectTarget() {
+        EntityPlayerSP player = Mc.player();
+        WorldClient world = Mc.world();
         if (player == null || world == null)
             return null;
 
-        // Prefer locked target when still valid — skip full world scan + LOS.
         if (lockedTarget != null && isValidCandidate(lockedTarget)) {
             int mode = targetingMode.getValue();
-            if (mode == 2) // Single
+            if (mode == 2)
                 return lockedTarget;
             long switchDelay = targetSwitchDelay.getValue().longValue();
             if (switchDelay > 0 && System.currentTimeMillis() - lastTargetSwitchMs < switchDelay)
                 return lockedTarget;
         }
 
-        float viewYaw = McAccess.getFloat(player, "field_70177_z");
+        float viewYaw = player.rotationYaw;
         int fovVal = Math.round(maximumFov.getValue());
         double rangeMaxVal = maximumRange.getValue();
         double rangeMinVal = minimumRange.getValue();
-        // Pad center-distance filter so edge-of-hitbox targets are not dropped early.
         double rangeMaxSq = (rangeMaxVal + 1.0) * (rangeMaxVal + 1.0);
         double rangeMinSq = Math.max(0.0, rangeMinVal - 0.5);
         rangeMinSq *= rangeMinSq;
 
-        List<Object> candidates = new ArrayList<>();
-        for (Object entity : McAccess.getWorldEntitiesFiltered(world)) {
-            if (entity == null || entity == player || !McAccess.isEntityPlayer(entity))
+        List<Entity> candidates = new ArrayList<>();
+        for (Entity entity : Mc.getWorldEntitiesFiltered(world)) {
+            if (entity == null || entity == player || !Mc.isEntityPlayer(entity))
                 continue;
-            if (McAccess.getInt(entity, "field_70725_aQ") > 0)
+            if (entity instanceof EntityLivingBase && ((EntityLivingBase) entity).deathTime > 0)
                 continue;
             if (ignoreFriends.getValue() && shouldFilterFriend(entity))
                 continue;
             if (!aimAtInvisible.getValue() && isInvisible(entity))
                 continue;
 
-            // Cheap center distance first (no AABB / eye reflection).
             double centerSq = RavenRotationUtils.distanceSqCenters(entity);
             if (centerSq > rangeMaxSq || centerSq < rangeMinSq)
                 continue;
@@ -434,15 +439,14 @@ public final class AimAssistModule extends Module {
         if (candidates.isEmpty())
             return null;
 
-        Comparator<Object> primary = buildTargetingComparator(player, viewYaw);
+        Comparator<Entity> primary = buildTargetingComparator(player, viewYaw);
         candidates.sort(primary);
 
         double mp = aimMode.getValue() == 1 ? multipointOffset.getValue() : 0.0;
         boolean blockWalls = !throughWalls.getValue();
-        // Only LOS-validate the best few — raytraces are the expensive part.
         int limit = Math.min(candidates.size(), 3);
         for (int i = 0; i < limit; i++) {
-            Object candidate = candidates.get(i);
+            Entity candidate = candidates.get(i);
             if (!blockWalls && aimMode.getValue() == 0)
                 return candidate;
             if (RavenRotationUtils.hasValidAimPoint(candidate, mp, mp, rangeMaxVal, blockWalls, false))
@@ -451,18 +455,14 @@ public final class AimAssistModule extends Module {
         return null;
     }
 
-    /**
-     * Check if an entity is still a valid target (for Single mode lock or
-     * TargetSwitchDelay persistence).
-     */
-    private boolean isValidCandidate(Object entity) {
-        Object player = McAccess.thePlayer();
+    private boolean isValidCandidate(Entity entity) {
+        EntityPlayerSP player = Mc.player();
         if (player == null || entity == null || entity == player)
             return false;
-        if (McAccess.getInt(entity, "field_70725_aQ") > 0)
+        if (entity instanceof EntityLivingBase && ((EntityLivingBase) entity).deathTime > 0)
             return false;
 
-        float viewYaw = McAccess.getFloat(player, "field_70177_z");
+        float viewYaw = player.rotationYaw;
         int fovVal = Math.round(maximumFov.getValue());
         double rangeMaxVal = maximumRange.getValue();
         double rangeMinVal = minimumRange.getValue();
@@ -477,63 +477,33 @@ public final class AimAssistModule extends Module {
         return RavenRotationUtils.hasValidAimPoint(entity, mp, mp, rangeMaxVal, blockWalls, false);
     }
 
-    private boolean shouldFilterFriend(Object entity) {
-        // Friends list module not ported — Ignore friends is a no-op until Friends module exists
+    private boolean shouldFilterFriend(Entity entity) {
         return false;
     }
 
-    private Comparator<Object> buildTargetingComparator(Object player, float viewYaw) {
+    private Comparator<Entity> buildTargetingComparator(EntityPlayerSP player, float viewYaw) {
         switch (targetingMode.getValue()) {
-            case 1: // Lowest HP
+            case 1:
                 return Comparator.comparingDouble(this::entityHealth);
-            case 2: // Single
-            case 3: // Switch
-            case 0: // Closest
+            case 2:
+            case 3:
+            case 0:
             default:
                 return Comparator.comparingDouble(RavenRotationUtils::distanceSqCenters);
         }
     }
 
-    private double entityHealth(Object entity) {
-        Object hp = McAccess.invoke(entity, "func_110143_aJ", new Class<?>[0]);
-        float health = hp instanceof Float ? (Float) hp : 0.0f;
-        return health;
+    private double entityHealth(Entity entity) {
+        if (entity instanceof EntityLivingBase)
+            return ((EntityLivingBase) entity).getHealth();
+        return 0.0;
     }
 
-    // ==================== Static helpers ====================
-
-    private static boolean holdingWeapon(Object player) {
-        Object stack = McAccess.invoke(player, "func_70694_bm", new Class<?>[0]);
+    private static boolean holdingWeapon(EntityPlayer player) {
+        ItemStack stack = player.getHeldItem();
         if (stack == null)
             return false;
-        Object item = McAccess.invoke(stack, "func_77973_b", new Class<?>[0]);
-        if (item == null)
-            return false;
-        Class<?> sword = swordCls();
-        Class<?> axe = axeCls();
-        return (sword != null && sword.isInstance(item)) || (axe != null && axe.isInstance(item));
-    }
-
-    private static Class<?> cachedSword;
-    private static Class<?> cachedAxe;
-    private static boolean weaponClassesResolved;
-
-    private static Class<?> swordCls() {
-        resolveWeaponClasses();
-        return cachedSword;
-    }
-
-    private static Class<?> axeCls() {
-        resolveWeaponClasses();
-        return cachedAxe;
-    }
-
-    private static void resolveWeaponClasses() {
-        if (weaponClassesResolved)
-            return;
-        cachedSword = McAccess.gameClass("net.minecraft.item.ItemSword");
-        cachedAxe = McAccess.gameClass("net.minecraft.item.ItemAxe");
-        weaponClassesResolved = true;
+        return stack.getItem() instanceof ItemSword || stack.getItem() instanceof ItemAxe;
     }
 
     private static boolean isLeftMouseDown() {
@@ -541,56 +511,30 @@ public final class AimAssistModule extends Module {
     }
 
     private static boolean isRightMouseDown() {
-        return McAccess.isPhysicalRmbDown();
+        return Mc.isPhysicalRmbDown();
     }
 
-    private static boolean isInvisible(Object entity) {
-        Object r = McAccess.invoke(entity, "func_82150_aj", new Class<?>[0]);
-        return r instanceof Boolean && (Boolean) r;
+    private static boolean isInvisible(Entity entity) {
+        return entity != null && entity.isInvisible();
     }
 
-    private static boolean isInWater(Object player) {
-        Object r = McAccess.invoke(player, "func_70090_H", new Class<?>[0]);
-        return r instanceof Boolean && (Boolean) r;
-    }
-
-    private static boolean isInsideTargetHitbox(Object player, Object target) {
+    private static boolean isInsideTargetHitbox(Entity player, Entity target) {
         double[] eye = eyePos(player, 1.0f);
-        Object bb = McAccess.invoke(target, "func_174813_aQ", new Class<?>[0]);
+        AxisAlignedBB bb = target.getEntityBoundingBox();
         if (eye == null || bb == null)
             return false;
-        Object vec = McAccess.newInstance("net.minecraft.util.Vec3",
-                new Class<?>[] { double.class, double.class, double.class }, eye[0], eye[1], eye[2]);
-        if (vec == null)
-            return false;
-        Object inside = McAccess.invoke(bb, "func_72316_a",
-                new Class<?>[] { McAccess.gameClass("net.minecraft.util.Vec3") }, vec);
-        return inside instanceof Boolean && (Boolean) inside;
+        return bb.isVecInside(new Vec3(eye[0], eye[1], eye[2]));
     }
 
-    private static boolean isCrosshairOnEntity(Object target) {
-        Object mop = McAccess.objectMouseOver();
-        if (mop == null)
-            return false;
-        Object hit = McAccess.getObject(mop, "field_72308_g");
-        return hit == target;
+    private static boolean isCrosshairOnEntity(Entity target) {
+        MovingObjectPosition mop = Mc.objectMouseOver();
+        return mop != null && mop.entityHit == target;
     }
 
-    private static double[] eyePos(Object player, float partialTicks) {
-        Object vec = McAccess.invoke(player, "func_174824_e", new Class<?>[] { float.class }, partialTicks);
+    private static double[] eyePos(Entity player, float partialTicks) {
+        Vec3 vec = player.getPositionEyes(partialTicks);
         if (vec == null)
             return null;
-        return new double[] {
-                McAccess.getDouble(vec, "field_72450_a"),
-                McAccess.getDouble(vec, "field_72448_b"),
-                McAccess.getDouble(vec, "field_72449_c")
-        };
-    }
-
-    private static int invokeInt(Object target, String method) {
-        Object r = McAccess.invoke(target, method, new Class<?>[0]);
-        if (r instanceof Integer)
-            return (Integer) r;
-        return 0;
+        return new double[] { vec.xCoord, vec.yCoord, vec.zCoord };
     }
 }

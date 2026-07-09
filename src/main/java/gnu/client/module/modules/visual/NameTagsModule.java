@@ -4,9 +4,15 @@ import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.runtime.mc.McAccess;
 import gnu.client.module.modules.combat.AntiBotModule;
 import gnu.client.module.modules.combat.RavenAntiBot;
+import gnu.client.runtime.mc.Mc;
+import net.minecraft.client.gui.FontRenderer;
+import net.minecraft.client.gui.ScaledResolution;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.multiplayer.WorldClient;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.player.EntityPlayer;
 
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
@@ -42,7 +48,6 @@ public final class NameTagsModule extends Module {
 
     private double vpX, vpY, vpZ;
     private double lastVpX, lastVpY, lastVpZ;
-    private Object cachedMc;
     private int mcDisplayWidth = 1;
     private int mcDisplayHeight = 1;
     private float lastPartialTicks;
@@ -81,43 +86,40 @@ public final class NameTagsModule extends Module {
     public void onTick() {
         cache.clear();
 
-        cachedMc = McAccess.getMinecraft();
-        Object player = McAccess.thePlayer(cachedMc);
-        Object world = McAccess.theWorld(cachedMc);
+        EntityPlayerSP player = Mc.player();
+        WorldClient world = Mc.world();
         if (player == null || world == null)
             return;
 
-        mcDisplayWidth = McAccess.getInt(cachedMc, "field_71443_c");
-        mcDisplayHeight = McAccess.getInt(cachedMc, "field_71440_d");
+        mcDisplayWidth = Mc.mc().displayWidth;
+        mcDisplayHeight = Mc.mc().displayHeight;
         if (mcDisplayWidth < 1)
             mcDisplayWidth = 1;
         if (mcDisplayHeight < 1)
             mcDisplayHeight = 1;
 
-        Object entitiesObj = McAccess.getObject(world, "field_73010_i");
-        if (!(entitiesObj instanceof List))
-            return;
-        List<?> entities = (List<?>) entitiesObj;
-
-        for (Object entity : entities) {
+        for (Entity entity : Mc.getWorldEntitiesFiltered(world)) {
             if (!showSelf.getValue() && entity == player)
                 continue;
 
             if (AntiBotModule.isActive() && RavenAntiBot.isBot(entity))
                 continue;
 
-            String tag = buildTag(entity);
+            if (!(entity instanceof EntityPlayer))
+                continue;
+
+            String tag = buildTag((EntityPlayer) entity);
             if (tag == null || tag.isEmpty())
                 continue;
 
             EntityData data = new EntityData();
-            data.lastX = McAccess.entityLastX(entity);
-            data.lastY = McAccess.entityLastY(entity);
-            data.lastZ = McAccess.entityLastZ(entity);
-            data.posX = McAccess.entityPosX(entity);
-            data.posY = McAccess.entityPosY(entity);
-            data.posZ = McAccess.entityPosZ(entity);
-            data.sneaking = McAccess.isSneaking(entity);
+            data.lastX = entity.lastTickPosX;
+            data.lastY = entity.lastTickPosY;
+            data.lastZ = entity.lastTickPosZ;
+            data.posX = entity.posX;
+            data.posY = entity.posY;
+            data.posZ = entity.posZ;
+            data.sneaking = entity.isSneaking();
             data.tag = tag;
             cache.add(data);
         }
@@ -125,7 +127,7 @@ public final class NameTagsModule extends Module {
         lastVpX = vpX;
         lastVpY = vpY;
         lastVpZ = vpZ;
-        double[] vp = McAccess.getViewerPos(cachedMc, 1.0f);
+        double[] vp = Mc.getViewerPos(1.0f);
         vpX = vp[0];
         vpY = vp[1];
         vpZ = vp[2];
@@ -133,15 +135,18 @@ public final class NameTagsModule extends Module {
 
     @Override
     public void onOverlay(Object sr) {
-        if (cache.isEmpty() || cachedMc == null || !glStateCaptured)
+        if (cache.isEmpty() || !glStateCaptured)
             return;
 
-        Object fr = McAccess.getObject(cachedMc, "field_71466_p");
+        FontRenderer fr = Mc.fontRenderer();
         if (fr == null)
             return;
 
-        int sw = invokeInt(sr, "func_78326_a");
-        int sh = invokeInt(sr, "func_78328_b");
+        if (!(sr instanceof ScaledResolution))
+            return;
+        ScaledResolution scaled = (ScaledResolution) sr;
+        int sw = scaled.getScaledWidth();
+        int sh = scaled.getScaledHeight();
         if (sw < 1 || sh < 1)
             return;
 
@@ -164,10 +169,10 @@ public final class NameTagsModule extends Module {
         GL11.glEnable(GL11.GL_TEXTURE_2D);
 
         for (EntityData data : cache) {
-            double wx = data.lastX + (data.posX - data.lastX) * lastPartialTicks;
-            double wy = data.lastY + (data.posY - data.lastY) * lastPartialTicks
+            double wx = Mc.lerp(data.lastX, data.posX, lastPartialTicks);
+            double wy = Mc.lerp(data.lastY, data.posY, lastPartialTicks)
                     + (data.sneaking ? 1.5 : 1.8) + 0.3;
-            double wz = data.lastZ + (data.posZ - data.lastZ) * lastPartialTicks;
+            double wz = Mc.lerp(data.lastZ, data.posZ, lastPartialTicks);
 
             double[] screen = projectToScreen(wx, wy, wz, rvpX, rvpY, rvpZ);
             if (screen == null)
@@ -186,7 +191,7 @@ public final class NameTagsModule extends Module {
                     ? Math.max(0.5f, Math.min(1.5f, (float) dist * 0.05f + 0.5f))
                     : scale.getValue();
 
-            int strWidth = stringWidth(fr, data.tag);
+            int strWidth = fr.getStringWidth(data.tag);
             if (strWidth <= 0)
                 continue;
 
@@ -198,7 +203,7 @@ public final class NameTagsModule extends Module {
                 drawRect(-strWidth / 2 - 1, -1, strWidth / 2 + 1, 9, 0x80000000);
             }
 
-            drawStringWithShadow(fr, data.tag, -strWidth / 2.0f, 0.0f, 0xFFFFFF);
+            fr.drawStringWithShadow(data.tag, -strWidth / 2.0f, 0.0f, 0xFFFFFF);
 
             GL11.glPopMatrix();
         }
@@ -262,48 +267,14 @@ public final class NameTagsModule extends Module {
         };
     }
 
-    private static int invokeInt(Object owner, String srg) {
-        Object result = McAccess.invoke(owner, srg, new Class<?>[0]);
-        return result instanceof Integer ? (Integer) result : 0;
-    }
-
-    private String buildTag(Object entity) {
-        Object displayName = McAccess.invokeNamed(entity, "getDisplayName", new Class<?>[0]);
-        if (displayName == null)
-            displayName = McAccess.invoke(entity, "func_145748_c_", new Class<?>[0]);
-        if (displayName == null)
+    private String buildTag(EntityPlayer entity) {
+        if (entity.getDisplayName() == null)
             return null;
-
-        Object formatted = McAccess.invoke(displayName, "func_150254_d", new Class<?>[0]);
-        if (formatted == null)
-            formatted = McAccess.invokeNamed(displayName, "getFormattedText", new Class<?>[0]);
-        String name = formatted instanceof String ? (String) formatted : displayName.toString();
-
+        String name = entity.getDisplayName().getFormattedText();
         if (showHealth.getValue()) {
-            Object hpObj = McAccess.invokeNamed(entity, "getHealth", new Class<?>[0]);
-            float hp = hpObj instanceof Float ? (Float) hpObj : 0.0f;
-            name = name + " \u00a7c" + (int) hp + "\u00a7f\u2665";
+            name = name + " \u00a7c" + (int) entity.getHealth() + "\u00a7f\u2665";
         }
         return name;
-    }
-
-    private int stringWidth(Object fr, String text) {
-        Object result = McAccess.invoke(fr, "func_78256_a", new Class<?>[] { String.class }, text);
-        if (result instanceof Integer)
-            return (Integer) result;
-        result = McAccess.invokeNamed(fr, "getStringWidth", new Class<?>[] { String.class }, text);
-        return result instanceof Integer ? (Integer) result : 0;
-    }
-
-    private void drawStringWithShadow(Object fr, String text, float x, float y, int color) {
-        Object result = McAccess.invoke(fr, "func_175065_a",
-                new Class<?>[] { String.class, float.class, float.class, int.class, boolean.class },
-                text, x, y, color, true);
-        if (result == null) {
-            McAccess.invokeNamed(fr, "drawStringWithShadow",
-                    new Class<?>[] { String.class, float.class, float.class, int.class },
-                    text, x, y, color);
-        }
     }
 
     private void drawRect(int x1, int y1, int x2, int y2, int color) {

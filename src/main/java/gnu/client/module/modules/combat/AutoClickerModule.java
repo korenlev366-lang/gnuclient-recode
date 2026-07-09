@@ -6,7 +6,16 @@ import gnu.client.module.modules.combat.HitSelectModule;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.ClientBootstrap;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
+import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.gui.inventory.GuiContainer;
+import gnu.client.mixin.impl.accessors.IAccessorGuiContainer;
+import net.minecraft.client.multiplayer.PlayerControllerMP;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.inventory.Container;
+import net.minecraft.inventory.Slot;
+import net.minecraft.util.MovingObjectPosition;
 
 import java.util.Random;
 
@@ -15,7 +24,7 @@ import java.util.Random;
  *
  * <p>Worker thread schedules clicks; {@link ClientBootstrap#queueAttackClick(int)} queues them
  * and {@link ClientBootstrap#drainPendingAttackClicks()} fires
- * {@link McAccess#pressAttackKeyOnce()} on the client tick.
+ * {@link Mc#pressAttackKeyOnce()} on the client tick.
  *
  * Also supports clicking in inventory/container GUIs (merged from the removed
  * InvClick module) via {@code PlayerControllerMP.windowClick} reflection when
@@ -90,7 +99,7 @@ public final class AutoClickerModule extends Module {
 
                 // --- Normal world click path ---
                 long interval = rollInterval();
-                Object player = McAccess.thePlayer();
+                EntityPlayerSP player = Mc.player();
                 boolean lmbDown = readLeftMouseDown();
 
                 if (gatesPass(player, lmbDown)) {
@@ -131,11 +140,11 @@ public final class AutoClickerModule extends Module {
      * @return true if an inventory was handled (caller should skip normal click path)
      */
     private boolean tryInventoryClick() {
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null)
             return false;
 
-        Object screen = McAccess.currentScreen();
+        GuiScreen screen = Mc.currentScreen();
         if (screen == null)
             return false;
 
@@ -144,31 +153,28 @@ public final class AutoClickerModule extends Module {
 
         long now = System.currentTimeMillis();
         if (inventoryNextClickMs == 0L) {
-            inventoryNextClickMs = now + 50L; // small initial delay
+            inventoryNextClickMs = now + 50L;
         }
         if (now < inventoryNextClickMs)
-            return true; // still in cooldown — don't fall through to world click
+            return true;
 
-        // Find hovered slot — field_147006_u = theSlot (hovered Slot) on GuiContainer.
-        // We detect "is this a container GUI?" by checking if this field exists,
-        // which works on both SRG and obfuscated runtimes (field_147006_u / notch d).
-        Object slot = McAccess.getObject(screen, "field_147006_u");
-        if (slot == null) {
-            // Not a container GUI — don't fall through to world click either,
-            // but return false so the caller sleeps and retries.
+        if (!(screen instanceof GuiContainer))
             return false;
-        }
+        GuiContainer containerGui = (GuiContainer) screen;
+        Slot slot = ((IAccessorGuiContainer) containerGui).getTheSlot();
+        if (slot == null)
+            return false;
 
-        int slotNumber = McAccess.getInt(slot, "field_75222_d"); // slotNumber
+        int slotNumber = slot.slotNumber;
         if (slotNumber < 0)
             return false;
 
-        Object container = McAccess.getObject(player, "field_71069_bz"); // openContainer
+        Container container = player.openContainer;
         if (container == null)
             return false;
-        int windowId = McAccess.getInt(container, "field_75152_c"); // windowId
+        int windowId = container.windowId;
 
-        Object playerController = McAccess.playerController();
+        PlayerControllerMP playerController = Mc.controller();
         if (playerController == null)
             return false;
 
@@ -208,20 +214,18 @@ public final class AutoClickerModule extends Module {
         return Math.max(50L, (long) interval);
     }
 
-    private boolean gatesPass(Object player, boolean lmbDown) {
+    private boolean gatesPass(EntityPlayerSP player, boolean lmbDown) {
         if (player == null)
             return false;
-        Object screen = McAccess.currentScreen();
-        if (screen != null)
+        if (Mc.currentScreen() != null)
             return false;
 
         if (!lmbDown)
             return false;
 
         if (breakBlocks.getValue()) {
-            Object mop = McAccess.objectMouseOver();
-            Object type = McAccess.getObject(mop, "field_72313_a");
-            if (type != null && type.toString().contains("BLOCK"))
+            MovingObjectPosition mop = Mc.objectMouseOver();
+            if (mop != null && mop.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK)
                 return false;
         }
         return true;
@@ -309,33 +313,8 @@ public final class AutoClickerModule extends Module {
         }
     }
 
-    /**
-     * Invoke {@code PlayerControllerMP.windowClick(windowId, slotId, clickedButton, mode, player)}
-     * via reflection.
-     *
-     * Uses {@link McAccess#gameClass(String)} for the EntityPlayer param type
-     * instead of {@code player.getClass()} — the declared method parameter is
-     * {@code EntityPlayer}, not {@code EntityPlayerSP}, and Java reflection's
-     * {@code getDeclaredMethod} requires an exact type match.
-     */
-    private static void windowClick(Object playerController, int windowId, int slotId,
-                                    int clickedButton, int mode, Object player) {
-        // Resolve the EntityPlayer base class — the method declares EntityPlayer,
-        // not EntityPlayerSP, and getDeclaredMethod requires exact parameter type match.
-        Class<?> entityPlayerClass = McAccess.gameClass("net.minecraft.entity.player.EntityPlayer");
-        if (entityPlayerClass == null)
-            entityPlayerClass = player.getClass(); // last-resort fallback
-        
-        Class<?>[] paramTypes = new Class<?>[] {
-                int.class, int.class, int.class, int.class,
-                entityPlayerClass
-        };
-        Object result = McAccess.invoke(playerController, "func_78753_a",
-                paramTypes, windowId, slotId, clickedButton, mode, player);
-        if (result == null) {
-            // Fallback: try MCP name if SRG lookup missed.
-            McAccess.invokeNamed(playerController, "windowClick",
-                    paramTypes, windowId, slotId, clickedButton, mode, player);
-        }
+    private static void windowClick(PlayerControllerMP playerController, int windowId, int slotId,
+                                    int clickedButton, int mode, EntityPlayer player) {
+        playerController.windowClick(windowId, slotId, clickedButton, mode, player);
     }
 }

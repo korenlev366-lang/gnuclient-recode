@@ -1,10 +1,8 @@
 package gnu.client.module;
 
-// Ordinals are the contract with the ClickGUI tab bar
+// Ordinals are the contract with ClickGUI column order
 // (0 Combat, 1 Player, 2 Visuals, 3 Misc, 4 Settings, 5 Scripts).
-// NOTE: 5 Scripts is NOT yet rendered by the ClickGUI tab bar — scripts are
-// functional (tick/settings) but GUI-invisible until the ClickGuiScreen
-// tab-bar gains a Scripts tab.
+// Scripts is shown as a sixth column when that category has modules.
 public enum Category {
     COMBAT,
     PLAYER,

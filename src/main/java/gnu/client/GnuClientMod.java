@@ -40,7 +40,7 @@ import gnu.client.module.modules.visual.TracersModule;
 import gnu.client.runtime.ClientEventListener;
 import gnu.client.runtime.ClientBootstrap;
 import gnu.client.runtime.PacketEventsBridge;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 import gnu.client.script.ScriptManager;
 import gnu.client.ui.clickgui.ClickGuiScreen;
 import net.minecraft.client.Minecraft;
@@ -68,9 +68,7 @@ public class GnuClientMod {
 
     @Mod.EventHandler
     public void init(FMLInitializationEvent event) {
-        Runtime.getRuntime().addShutdownHook(new Thread(ConfigManager.INSTANCE::save));
-
-        McAccess.resolve(GnuClientMod.class.getClassLoader());
+        Runtime.getRuntime().addShutdownHook(new Thread(ConfigManager.INSTANCE::flush));
 
         MinecraftForge.EVENT_BUS.register(this);
         MinecraftForge.EVENT_BUS.register(new ClientEventListener());
@@ -143,7 +141,7 @@ public class GnuClientMod {
 
     @SubscribeEvent
     public void onClientTick(TickEvent.ClientTickEvent event) {
-        if (event.phase == TickEvent.Phase.END && McAccess.isInGame()) {
+        if (event.phase == TickEvent.Phase.END && Mc.isInGame()) {
             TimerModule.maintain();
         }
     }

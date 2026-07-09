@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import gnu.client.config.ConfigManager;
 import gnu.client.module.modules.visual.HudModule;
 import gnu.client.module.setting.Setting;
+import gnu.client.ui.hud.ModuleToggleSignals;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -68,6 +69,7 @@ public abstract class Module {
         if (this.enabled == enabled)
             return;
         this.enabled = enabled;
+        ModuleToggleSignals.mark(this);
         if (enabled)
             onEnable();
         else

@@ -1,10 +1,19 @@
 package gnu.client.runtime;
 
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
 
 /**
  * Shared OpenMyau-style silent movefix helpers used by Scaffold and KillAura.
- * Matches OpenMyau {@code MoveUtil} fixStrafe / isForwardPressed / adjustYaw.
+ *
+ * <p><b>Contract</b> (vanilla-feel physics while C03 uses silent yaw):
+ * <ul>
+ *   <li>{@code moveYaw} ({@link RotationState#getSmoothedYaw}) — {@link #fixStrafe} +
+ *       {@code moveFlying}/jump via {@link MoveFixHook}; must track <b>sent</b> C03 yaw
+ *       while rotations are stepping (not the unfinished target)</li>
+ *   <li>{@code packetYaw} — C03 (may step toward {@code moveYaw})</li>
+ *   <li>Arm {@link RotationState} only when MoveFix is enabled (KA priority 1 / Scaffold 3)</li>
+ *   <li>Attack slow: OpenMyau local {@code motion *= 0.6} + clear sprint; never scale S12</li>
+ * </ul>
  */
 public final class MoveFixUtil {
 
@@ -18,13 +27,17 @@ public final class MoveFixUtil {
     }
 
     public static boolean isForwardPressed() {
-        return McAccess.isForwardKeyHeld() != McAccess.isBackKeyHeld()
-            || McAccess.isLeftKeyHeld() != McAccess.isRightKeyHeld();
+        return Mc.isForwardKeyHeld() != Mc.isBackKeyHeld()
+            || Mc.isLeftKeyHeld() != Mc.isRightKeyHeld();
     }
 
     /**
      * OpenMyau {@code MoveUtil.fixStrafe} — 8-direction input, ±1 only (Grim-safe).
      * Remaps camera-relative keys to server-yaw-relative forward/strafe.
+     *
+     * <p>Call after vanilla sneak scaling: this <b>overwrites</b> moveForward/Strafe
+     * with ±1 then re-applies sneak 0.3 (same as OpenMyau). Pass {@code sneak} from
+     * {@code MovementInput.sneak}, not a second scale on already-scaled values.
      */
     public static float[] fixStrafe(float cameraYaw, float serverYaw, boolean sneak) {
         int forwardKey = forwardKeyValue();
@@ -65,23 +78,23 @@ public final class MoveFixUtil {
 
     /** Camera + WASD → world movement facing (matches OpenMyau {@code adjustYaw} + keys). */
     public static float movementFacingYaw() {
-        return adjustYaw(McAccess.getYaw(), forwardKeyValue(), leftKeyValue());
+        return adjustYaw(Mc.getYaw(), forwardKeyValue(), leftKeyValue());
     }
 
     private static int forwardKeyValue() {
         int value = 0;
-        if (McAccess.isForwardKeyHeld())
+        if (Mc.isForwardKeyHeld())
             value++;
-        if (McAccess.isBackKeyHeld())
+        if (Mc.isBackKeyHeld())
             value--;
         return value;
     }
 
     private static int leftKeyValue() {
         int value = 0;
-        if (McAccess.isLeftKeyHeld())
+        if (Mc.isLeftKeyHeld())
             value++;
-        if (McAccess.isRightKeyHeld())
+        if (Mc.isRightKeyHeld())
             value--;
         return value;
     }

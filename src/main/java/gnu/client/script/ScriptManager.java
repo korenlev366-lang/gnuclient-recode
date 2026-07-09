@@ -5,7 +5,8 @@ import gnu.client.config.ConfigManager;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.runtime.ClientBootstrap;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
+import gnu.client.ui.hud.HudRenderer;
 
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticCollector;
@@ -51,11 +52,11 @@ import java.util.Random;
  *       register before the post-load {@link ConfigManager#load()} pass. The
  *       generated {@code onEnable} is a no-op.</li>
  *   <li><b>ClassLoader parent</b>: {@code ScriptManager.class.getClassLoader()}
- *       (not {@link McAccess#gameLoader()}) to guarantee the script's
+ *       (not the game classloader) to guarantee the script's
  *       {@code Module} superclass is the same {@code Class} object that
  *       {@link ModuleManager} uses — otherwise {@code (Module) instance} throws
  *       {@code ClassCastException} when the two LaunchClassLoader instances differ
- *       (see McAccess.java header comment on the observed dual-CL case).</li>
+ *       (see legacy McAccess dual-CL notes in runtime docs).</li>
  * </ol>
  *
  * <p>Manual refresh trigger: {@link #reloadAll()} is the entry point. No chat
@@ -111,6 +112,9 @@ public final class ScriptManager {
      * re-run {@link ConfigManager#load()} to apply saved script settings.
      */
     public void reloadAll() {
+        // Suppress HUD toasts for unregister/disable churn before ConfigManager.load().
+        HudRenderer.instance().requestSilentReseed();
+
         // 1. Tear down currently loaded scripts.
         for (LoadedScript ls : loaded.values()) {
             try {
@@ -293,7 +297,7 @@ public final class ScriptManager {
         sb.append("import gnu.client.module.setting.BoolSetting;\n"); line++;
         sb.append("import gnu.client.module.setting.SliderSetting;\n"); line++;
         sb.append("import gnu.client.runtime.ClientBootstrap;\n"); line++;
-        sb.append("import gnu.client.runtime.mc.McAccess;\n"); line++;
+        sb.append("import gnu.client.runtime.mc.Mc;\n"); line++;
         sb.append("import gnu.client.runtime.packet.PacketEvents;\n"); line++;
         sb.append("import gnu.client.runtime.packet.PacketListener;\n"); line++;
         sb.append("import gnu.client.script.Client;\n"); line++;
@@ -491,10 +495,11 @@ public final class ScriptManager {
             if (Math.abs(target - VANILLA_ITEM_SLOW) < 0.001f)
                 continue;
             float scale = target / VANILLA_ITEM_SLOW;
-            float forward = McAccess.getFloat(movInput, "field_78900_b");
-            float strafe = McAccess.getFloat(movInput, "field_78902_a");
-            McAccess.setFloat(movInput, "field_78900_b", forward * scale);
-            McAccess.setFloat(movInput, "field_78902_a", strafe * scale);
+            if (movInput instanceof net.minecraft.util.MovementInput) {
+                net.minecraft.util.MovementInput mi = (net.minecraft.util.MovementInput) movInput;
+                mi.moveForward *= scale;
+                mi.moveStrafe *= scale;
+            }
             break;
         }
 

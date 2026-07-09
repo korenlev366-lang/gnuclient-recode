@@ -1,8 +1,12 @@
 package gnu.client.script;
 
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.item.ItemStack;
 
-/** Script-facing player/entity status facade over {@link McAccess}. */
+/** Script-facing player/entity status facade over {@link Mc}. */
 public final class Status {
 
     public static final Status INSTANCE = new Status();
@@ -10,114 +14,127 @@ public final class Status {
     private Status() {}
 
     public boolean isUsingItem() {
-        return McAccess.isUsingItem();
+        return Mc.isUsingItem();
     }
 
     public boolean isUsingItem(Object player) {
-        return McAccess.isUsingItem(player);
+        return Mc.isUsingItem(asPlayer(player));
     }
 
     public boolean isBlocking() {
-        return McAccess.isBlocking();
+        return Mc.isBlocking();
     }
 
     public boolean isBlocking(Object player) {
-        return McAccess.isBlocking(player);
+        return Mc.isBlocking(asPlayer(player));
     }
 
     public int getHurtTime() {
-        return McAccess.getHurtTime();
+        return Mc.getHurtTime();
     }
 
     public int getHurtTime(Object entity) {
-        return McAccess.getHurtTime(entity);
+        return Mc.getHurtTime(asLiving(entity));
     }
 
     public int getMaxHurtTime(Object entity) {
-        return McAccess.getMaxHurtTime(entity);
+        return Mc.getMaxHurtTime(asLiving(entity));
     }
 
     public int getDeathTime(Object entity) {
-        return McAccess.getDeathTime(entity);
+        return Mc.getDeathTime(asLiving(entity));
     }
 
     public float getHealth() {
-        return McAccess.getHealth();
+        return Mc.getHealth();
     }
 
     public float getHealth(Object entity) {
-        return McAccess.getHealth(entity);
+        return Mc.getHealth(asLiving(entity));
     }
 
     public float getMaxHealth() {
-        return McAccess.getMaxHealth();
+        return Mc.getMaxHealth();
     }
 
     public float getMaxHealth(Object entity) {
-        return McAccess.getMaxHealth(entity);
+        return Mc.getMaxHealth(asLiving(entity));
     }
 
     public float getAbsorption() {
-        return McAccess.getAbsorption();
+        return Mc.getAbsorption();
     }
 
     public float getAbsorption(Object entity) {
-        return McAccess.getAbsorption(entity);
+        return Mc.getAbsorption(asLiving(entity));
     }
 
     public boolean isDead() {
-        return McAccess.isDead();
+        return Mc.isDead(Mc.player());
     }
 
     public boolean isDead(Object entity) {
-        return McAccess.isDead(entity);
+        return Mc.isDead(asEntity(entity));
     }
 
     public boolean isAlive() {
-        return McAccess.isAlive();
+        return Mc.isAlive();
     }
 
     public boolean isAlive(Object entity) {
-        return McAccess.isAlive(entity);
+        return Mc.isAlive(asEntity(entity));
     }
 
     public boolean isSwingInProgress() {
-        return McAccess.isSwingInProgress();
+        return Mc.isSwingInProgress();
     }
 
     public boolean isSwingInProgress(Object player) {
-        return McAccess.isSwingInProgress(player);
+        return Mc.isSwingInProgress(asLiving(player));
     }
 
     public Object getHeldItemStack() {
-        return McAccess.getHeldItemStack();
+        return Mc.getHeldItemStack();
     }
 
     public Object getHeldItemStack(Object player) {
-        return McAccess.getHeldItemStack(player);
+        ItemStack stack = Mc.getHeldItemStack(asPlayer(player));
+        return stack;
     }
 
     public boolean isHoldingSword() {
-        return McAccess.isHoldingSword();
+        return Mc.isHoldingSword();
     }
 
     public boolean isHoldingBlock() {
-        return McAccess.isHoldingBlock();
+        return Mc.isHoldingBlock();
     }
 
     public boolean isHoldingBow() {
-        return McAccess.isHoldingBow();
+        return Mc.isHoldingBow();
     }
 
     public boolean isHoldingConsumable() {
-        return McAccess.isHoldingConsumable();
+        return Mc.isHoldingConsumable();
     }
 
     public boolean isInWater() {
-        return McAccess.isInWater();
+        return Mc.isInWater();
     }
 
     public boolean isInWater(Object entity) {
-        return McAccess.isInWater(entity);
+        return Mc.isInWater(asEntity(entity));
+    }
+
+    private static Entity asEntity(Object entity) {
+        return entity instanceof Entity ? (Entity) entity : null;
+    }
+
+    private static EntityLivingBase asLiving(Object entity) {
+        return entity instanceof EntityLivingBase ? (EntityLivingBase) entity : null;
+    }
+
+    private static EntityPlayer asPlayer(Object player) {
+        return player instanceof EntityPlayer ? (EntityPlayer) player : null;
     }
 }

@@ -4,17 +4,18 @@ import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.modules.combat.AutoBlockModule;
-import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.combat.WTapModule;
 import gnu.client.module.modules.player.ScaffoldModule;
-import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.mc.Mc;
+import net.minecraft.client.entity.EntityPlayerSP;
 
 /**
  * Auto-sprint via sprint keybind (OpenMyau {@code Sprint}).
  *
  * <p>Holds the sprint key every tick START so sprint persists through jumps.
- * Yields to {@link WTapModule} / KillAura attack-tick / Scaffold sprint-mode NONE /
- * {@link AutoBlockModule} while blocking.
+ * Yields to {@link WTapModule} / Scaffold sprint-mode NONE /
+ * {@link AutoBlockModule} while blocking. Does <b>not</b> yield to KillAura —
+ * OpenMyau Sprint keeps the key held through hits so living re-sprints.
  */
 public final class SprintModule extends Module {
 
@@ -27,35 +28,31 @@ public final class SprintModule extends Module {
 
     @Override
     public void onDisable() {
-        McAccess.setSprintKeyState(false);
+        Mc.setSprintKeyState(false);
     }
 
     @Override
     public void onTickStart() {
         if (!isEnabled())
             return;
-        Object player = McAccess.thePlayer();
+        EntityPlayerSP player = Mc.player();
         if (player == null)
             return;
         if (WTapModule.shouldSuppressSprintKey()) {
-            McAccess.setSprintKeyState(false);
-            return;
-        }
-        if (KillAuraModule.shouldSuppressSprintKey()) {
-            McAccess.setSprintKeyState(false);
+            Mc.setSprintKeyState(false);
             return;
         }
         if (ScaffoldModule.shouldSuppressSprintKey()) {
-            McAccess.setSprintKeyState(false);
-            McAccess.setClientSprinting(player, false);
+            Mc.setSprintKeyState(false);
+            Mc.setClientSprinting(player, false);
             return;
         }
         Module autoBlock = ModuleManager.INSTANCE.getModule("Auto Block");
         if (autoBlock instanceof AutoBlockModule && ((AutoBlockModule) autoBlock).isActive()) {
-            McAccess.setSprintKeyState(false);
-            McAccess.setClientSprinting(player, false);
+            Mc.setSprintKeyState(false);
+            Mc.setClientSprinting(player, false);
             return;
         }
-        McAccess.setSprintKeyState(true);
+        Mc.setSprintKeyState(true);
     }
 }

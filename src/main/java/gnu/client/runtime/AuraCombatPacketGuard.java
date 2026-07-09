@@ -10,8 +10,9 @@ import gnu.client.runtime.packet.PacketListener;
  * Grim BadPacketsX parity: at most one sprint and one sneak C0B between C03 packets.
  * Also blocks START_SPRINTING on the aura attack tick (vanilla attack slow window).
  *
- * <p>Registered while KillAura is enabled. {@link gnu.client.runtime.mc.McAccess#sendSprintActionPacket}
- * consults {@link #shouldCancelEntityAction} so injected C0B cannot bypass this guard.
+ * <p>Registered while KillAura is enabled. {@link gnu.client.runtime.mc.Mc#sendSprintActionPacket}
+ * peeks via {@link #shouldCancelEntityAction} (read-only); only {@link #onSend} commits the
+ * one-per-move slot so a pre-check cannot mark the slot and then cancel the real send.
  */
 public final class AuraCombatPacketGuard implements PacketListener {
 
@@ -32,11 +33,14 @@ public final class AuraCombatPacketGuard implements PacketListener {
         INSTANCE.sneakActionSinceMove = false;
     }
 
-    /** Called from {@code McAccess.sendSprintActionPacket} before queueing. */
+    /**
+     * Read-only peek for {@code Mc.send*ActionPacket} — must not mutate slot flags.
+     * Commit happens only in {@link #onSend}.
+     */
     public static boolean shouldCancelEntityAction(Object packet) {
         if (!isGuardActive())
             return false;
-        return INSTANCE.checkEntityAction(packet);
+        return INSTANCE.wouldCancel(packet);
     }
 
     @Override
@@ -61,6 +65,20 @@ public final class AuraCombatPacketGuard implements PacketListener {
         return false;
     }
 
+    private boolean wouldCancel(Object packet) {
+        if (PacketHelper.isSprintEntityAction(packet))
+            return wouldCancelSprint(packet);
+        if (PacketHelper.isSneakEntityAction(packet))
+            return sneakActionSinceMove;
+        return false;
+    }
+
+    private boolean wouldCancelSprint(Object packet) {
+        // One sprint C0B per move (BadPacketsX). No post-hit START suppress —
+        // OpenMyau lets living re-sprint after attack slow.
+        return sprintActionSinceMove;
+    }
+
     private boolean checkEntityAction(Object packet) {
         if (PacketHelper.isSprintEntityAction(packet))
             return checkSprintAction(packet);
@@ -70,10 +88,7 @@ public final class AuraCombatPacketGuard implements PacketListener {
     }
 
     private boolean checkSprintAction(Object packet) {
-        if (KillAuraModule.shouldSuppressSprintRestart()
-            && PacketHelper.isStartSprintEntityAction(packet))
-            return true;
-        if (sprintActionSinceMove)
+        if (wouldCancelSprint(packet))
             return true;
         sprintActionSinceMove = true;
         return false;
