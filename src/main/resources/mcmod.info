@@ -1,0 +1,11 @@
+[
+  {
+    "modid": "${modid}",
+    "name": "GNUClient",
+    "description": "GNUClient Forge 1.8.9 — ported from JVMTI agent.",
+    "version": "${version}",
+    "mcversion": "${mcversion}",
+    "authorList": ["GNU"],
+    "url": ""
+  }
+]
