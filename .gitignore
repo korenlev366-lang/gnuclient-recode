@@ -1,0 +1,26 @@
+# Gradle
+.gradle/
+build/
+out/
+**/build/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*~
+
+# Run / Loom
+run/
+runs/
+*.log
+
+# Artifacts
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+*.class
+
+# OS
+.DS_Store
+Thumbs.db
