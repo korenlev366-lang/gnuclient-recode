@@ -3,9 +3,13 @@ package gnu.client.runtime;
 import gnu.client.config.ConfigManager;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
+import gnu.client.event.JumpEvent;
+import gnu.client.event.StrafeEvent;
 import gnu.client.module.modules.combat.AntiBotModule;
+import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.module.modules.combat.RavenAntiBot;
 import gnu.client.module.modules.combat.ReachModule;
+import gnu.client.module.modules.combat.MoreKBModule;
 import gnu.client.module.modules.combat.WTapModule;
 import gnu.client.module.modules.network.BacktrackModule;
 import gnu.client.module.modules.network.LagrangeModule;
@@ -113,6 +117,16 @@ public final class ClientEventListener {
     }
 
     @SubscribeEvent
+    public void onStrafe(StrafeEvent event) {
+        VelocityModule.patchStrafe(event);
+    }
+
+    @SubscribeEvent
+    public void onJump(JumpEvent event) {
+        VelocityModule.patchJump(event);
+    }
+
+    @SubscribeEvent
     public void onAttackEntity(AttackEntityEvent event) {
         if (!Mc.isInGame())
             return;
@@ -124,8 +138,16 @@ public final class ClientEventListener {
         if (wTap instanceof WTapModule && wTap.isEnabled())
             ((WTapModule) wTap).noteForgeAttack(event.target);
 
+        Module moreKb = ModuleManager.INSTANCE.getModule("MoreKB");
+        if (moreKb instanceof MoreKBModule && moreKb.isEnabled())
+            ((MoreKBModule) moreKb).noteForgeAttack(event.target);
+
         Module lagrange = ModuleManager.INSTANCE.getModule("Lagrange");
         if (lagrange instanceof LagrangeModule && lagrange.isEnabled())
             ((LagrangeModule) lagrange).noteForgeAttack(event.target);
+
+        Module velocity = ModuleManager.INSTANCE.getModule("Velocity");
+        if (velocity instanceof VelocityModule && velocity.isEnabled())
+            ((VelocityModule) velocity).noteAttack(event.target);
     }
 }

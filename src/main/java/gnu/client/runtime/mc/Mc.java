@@ -74,7 +74,8 @@ public final class Mc {
     }
 
     public static EntityPlayerSP player() {
-        return mc().thePlayer;
+        Minecraft m = mc();
+        return m != null ? m.thePlayer : null;
     }
 
     public static WorldClient world() {

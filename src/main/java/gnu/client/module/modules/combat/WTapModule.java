@@ -165,6 +165,10 @@ public final class WTapModule extends Module implements PacketListener {
     public void onEnable() {
         clearState();
         PacketEvents.register(this);
+
+        Module moreKb = ModuleManager.INSTANCE.getModule("MoreKB");
+        if (moreKb != null && moreKb.isEnabled())
+            moreKb.setEnabled(false);
     }
 
     @Override

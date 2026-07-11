@@ -3,402 +3,308 @@ package gnu.client.module.modules.combat;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
+import gnu.client.module.modules.combat.velocity.AACVelocity;
+import gnu.client.module.modules.combat.velocity.BounceVelocity;
+import gnu.client.module.modules.combat.velocity.BufferAbuseVelocity;
+import gnu.client.module.modules.combat.velocity.DelayVelocity;
+import gnu.client.module.modules.combat.velocity.GrimReduceVelocity;
+import gnu.client.module.modules.combat.velocity.GrimTestVelocity;
+import gnu.client.module.modules.combat.velocity.GrimVelocity;
+import gnu.client.module.modules.combat.velocity.GroundVelocity;
+import gnu.client.module.modules.combat.velocity.IntaveReduceVelocity;
+import gnu.client.module.modules.combat.velocity.IntaveVelocity;
+import gnu.client.module.modules.combat.velocity.JumpResetVelocity;
+import gnu.client.module.modules.combat.velocity.KarhuVelocity;
+import gnu.client.module.modules.combat.velocity.LegitSmartVelocity;
+import gnu.client.module.modules.combat.velocity.LegitTestVelocity;
+import gnu.client.module.modules.combat.velocity.LegitVelocity;
+import gnu.client.module.modules.combat.velocity.MMCVelocity;
+import gnu.client.module.modules.combat.velocity.MatrixVelocity;
+import gnu.client.module.modules.combat.velocity.OMDelayVelocity;
+import gnu.client.module.modules.combat.velocity.RedeskyVelocity;
+import gnu.client.module.modules.combat.velocity.ReverseVelocity;
+import gnu.client.module.modules.combat.velocity.StandardVelocity;
+import gnu.client.module.modules.combat.velocity.TickVelocity;
+import gnu.client.module.modules.combat.velocity.UniversoCraftVelocity;
+import gnu.client.module.modules.combat.velocity.VelocityDelayQueue;
+import gnu.client.module.modules.combat.velocity.VelocityMode;
+import gnu.client.module.modules.combat.velocity.VulcanVelocity;
+import gnu.client.module.modules.combat.velocity.WatchdogPredictionVelocity;
+import gnu.client.module.modules.combat.velocity.WatchdogVelocity;
+import gnu.client.event.JumpEvent;
+import gnu.client.event.StrafeEvent;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.PacketEvents;
-import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
+import net.minecraft.block.material.Material;
 import net.minecraft.client.entity.EntityPlayerSP;
-import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.util.MovementInput;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.Random;
 
 /**
- * Knockback reduction. Three modes:
+ * OpenMiau-style Velocity — 26 modes via {@link VelocityMode} strategies.
  *
- * <ul>
- *   <li><b>Reduce</b> — (default) scales the local player's motion by configured
- *       percentages every tick the player is hurt. Ported from RainClient
- *       {@code Velocity}.</li>
- *   <li><b>JumpReset</b> — jumps on knockback to reduce horizontal velocity.
- *       Ported from the standalone JumpResetModule (now merged here).</li>
- *   <li><b>Intave</b> — combined mode: reduce-on-attack (multiply horizontal
- *       velocity by a factor when attacking while hurt) + jump-reset
- *       (reuses the JumpReset machinery). All fragile constants are tunable.</li>
- * </ul>
- *
- * <p>SRG (1.8.9): motionX=field_70159_w, motionY=field_70181_x, motionZ=field_70179_y
- * (Entity); hurtTime=field_70737_aN (EntityLivingBase).</p>
+ * <p>Tick dispatch: {@link #onTickStart()} → {@code onUpdate(true)} (PRE / early tick);
+ * {@link #onTick()} → {@code onUpdate(false)} (POST / late tick).</p>
  */
 public final class VelocityModule extends Module implements PacketListener {
 
-    // ────────────────────────────────────────────────────────────────
-    // Mode
-    // ────────────────────────────────────────────────────────────────
+    private static final int STANDARD_MODE_INDEX = 7;
 
-    private static final String[] MODES = { "Reduce", "JumpReset", "Intave" };
+    private static final List<String> MODE_NAMES = Collections.unmodifiableList(Arrays.asList(
+            "OMDelay", "Reverse", "LegitTest", "LegitSmart", "IntaveReduce", "Grimtest", "JumpReset",
+            "Standard", "AAC", "Bounce", "BufferAbuse", "Delay", "Grim", "GrimReduce", "Ground", "Intave",
+            "Karhu", "Legit", "MMC", "Matrix", "Redesky", "Tick", "UniversoCraft", "Vulcan",
+            "WatchdogPrediction", "Watchdog"));
 
-    private final ModeSetting mode =
-            addSetting(new ModeSetting("Mode", 0, Arrays.asList(MODES)));
+    // ── Settings (public final — modes read directly) ─────────────────────
 
-    // ────────────────────────────────────────────────────────────────
-    // Reduce mode settings (existing)
-    // ────────────────────────────────────────────────────────────────
+    public final ModeSetting mode =
+            addSetting(new ModeSetting("Mode", STANDARD_MODE_INDEX, MODE_NAMES));
 
-    private final SliderSetting horizontal =
-            addSetting(new SliderSetting("Horizontal %", 0.0f, 0.0f, 100.0f));
-    private final SliderSetting vertical =
-            addSetting(new SliderSetting("Vertical %", 0.0f, 0.0f, 100.0f));
-    private final SliderSetting chance =
-            addSetting(new SliderSetting("Chance %", 100.0f, 0.0f, 100.0f));
+    public final SliderSetting delayTicks =
+            addSetting(new SliderSetting("Delay Ticks", 3.0f, 1.0f, 20.0f, 1.0f));
+    public final SliderSetting delayChance =
+            addSetting(new SliderSetting("Delay Chance", 100.0f, 0.0f, 100.0f));
 
-    // ────────────────────────────────────────────────────────────────
-    // JumpReset mode settings (moved from JumpResetModule)
-    // ────────────────────────────────────────────────────────────────
+    public final SliderSetting legitSmartJumpLimit =
+            addSetting(new SliderSetting("Legit Smart Jump Limit", 2.0f, 1.0f, 5.0f, 1.0f));
 
-    private static final int HURT_TICK_TARGET = 9;
+    public final SliderSetting intaveReduceFactor =
+            addSetting(new SliderSetting("Intave Reduce Factor", 0.6f, 0.6f, 1.0f));
+    public final SliderSetting intaveReduceHurtTime =
+            addSetting(new SliderSetting("Intave Reduce Hurt Time", 9.0f, 1.0f, 10.0f, 1.0f));
 
-    private final SliderSetting jumpChance =
+    public final SliderSetting chance =
             addSetting(new SliderSetting("Chance", 100.0f, 0.0f, 100.0f));
-    private final SliderSetting minHorizontalKb =
-            addSetting(new SliderSetting("Min Horizontal KB", 0.0f, 0.0f, 10.0f));
-    private final SliderSetting tickDelay =
-            addSetting(new SliderSetting("Tick", 0.0f, 0.0f, 20.0f));
-    private final BoolSetting jumpHorizontal =
-            addSetting(new BoolSetting("Horizontal", true));
-    private final BoolSetting sprintingOnly =
-            addSetting(new BoolSetting("Sprinting only", false));
-    private final BoolSetting disableInWater =
-            addSetting(new BoolSetting("Disable in water", false));
-    private final BoolSetting disableOnHit =
-            addSetting(new BoolSetting("Disable on hit", false));
 
-    // ────────────────────────────────────────────────────────────────
-    // Intave mode settings (new)
-    // ────────────────────────────────────────────────────────────────
+    public final SliderSetting horizontal =
+            addSetting(new SliderSetting("Horizontal", 0.0f, 0.0f, 100.0f));
+    public final SliderSetting vertical =
+            addSetting(new SliderSetting("Vertical", 100.0f, 0.0f, 100.0f));
 
-    private final SliderSetting intaveFactor =
-            addSetting(new SliderSetting("Intave Factor", 0.6f, 0.0f, 1.0f));
-    private final SliderSetting intaveHurtMin =
-            addSetting(new SliderSetting("Intave HurtTime Min", 8.0f, 1.0f, 10.0f));
-    private final SliderSetting intaveHurtMax =
-            addSetting(new SliderSetting("Intave HurtTime Max", 9.0f, 1.0f, 10.0f));
-    private final SliderSetting intaveCooldownMs =
-            addSetting(new SliderSetting("Intave Cooldown ms", 2000.0f, 0.0f, 10000.0f));
+    public final SliderSetting explosionHorizontal =
+            addSetting(new SliderSetting("Explosions Horizontal", 100.0f, 0.0f, 100.0f));
+    public final SliderSetting explosionVertical =
+            addSetting(new SliderSetting("Explosions Vertical", 100.0f, 0.0f, 100.0f));
 
-    // ────────────────────────────────────────────────────────────────
-    // Shared state
-    // ────────────────────────────────────────────────────────────────
+    public final SliderSetting grimReduceJumpLimit =
+            addSetting(new SliderSetting("Grim Reduce Jump Limit", 2.0f, 1.0f, 5.0f, 1.0f));
 
-    private final Random random = new Random();
+    public final BoolSetting fakeCheck =
+            addSetting(new BoolSetting("Fake Check", true));
+    public final BoolSetting debugLog =
+            addSetting(new BoolSetting("Debug Log", false));
+    public final BoolSetting onSwing =
+            addSetting(new BoolSetting("On Swing", false));
 
-    // ────────────────────────────────────────────────────────────────
-    // JumpReset state (moved from JumpResetModule)
-    // ────────────────────────────────────────────────────────────────
+    // ── Shared state (OpenMiau Velocity.java parity) ──────────────────────
 
-    private boolean isFallDamage;
-    private boolean hasHitKnockback;
-    private float lastHorizontalKb;
-    private int ticksSinceKnockback;
-    private int lastLimitTick = -1;
+    public int chanceCounter;
+    public int delayChanceCounter;
+    public boolean pendingExplosion;
+    public boolean allowNext = true;
+    public boolean jumpFlag;
+    public boolean reverseFlag;
+    public boolean delayActive;
+    public boolean shouldJump;
+    public int jumpCooldown;
+    public boolean hasReceivedVelocity;
+    public int legitSmartJumpCount;
+    public int intaveTick;
+    public int intaveDamageTick;
 
-    // ────────────────────────────────────────────────────────────────
-    // Intave state
-    // ────────────────────────────────────────────────────────────────
+    public final VelocityDelayQueue delayQueue = new VelocityDelayQueue();
+    public final Random random = new Random();
 
-    private long lastAttackMs;
-
-    // ────────────────────────────────────────────────────────────────
-    // Construction
-    // ────────────────────────────────────────────────────────────────
+    public final List<VelocityMode> modes = new ArrayList<>();
 
     public VelocityModule() {
         super("Velocity", "Reduces knockback from hits", Category.COMBAT);
-        horizontal.visibleWhen(() -> mode.getIndex() == 0);
-        vertical.visibleWhen(() -> mode.getIndex() == 0);
-        chance.visibleWhen(() -> mode.getIndex() == 0);
-        jumpChance.visibleWhen(() -> mode.getIndex() == 1 || mode.getIndex() == 2);
-        minHorizontalKb.visibleWhen(() -> mode.getIndex() == 1 || mode.getIndex() == 2);
-        tickDelay.visibleWhen(() -> mode.getIndex() == 1 || mode.getIndex() == 2);
-        jumpHorizontal.visibleWhen(() -> mode.getIndex() == 1 || mode.getIndex() == 2);
-        sprintingOnly.visibleWhen(() -> mode.getIndex() == 1 || mode.getIndex() == 2);
-        disableInWater.visibleWhen(() -> mode.getIndex() == 1 || mode.getIndex() == 2);
-        disableOnHit.visibleWhen(() -> mode.getIndex() == 1 || mode.getIndex() == 2);
-        intaveFactor.visibleWhen(() -> mode.getIndex() == 2);
-        intaveHurtMin.visibleWhen(() -> mode.getIndex() == 2);
-        intaveHurtMax.visibleWhen(() -> mode.getIndex() == 2);
-        intaveCooldownMs.visibleWhen(() -> mode.getIndex() == 2);
+
+        delayTicks.visibleWhen(() -> modeIs("OMDelay"));
+        delayChance.visibleWhen(() -> modeIs("OMDelay"));
+        legitSmartJumpLimit.visibleWhen(() -> modeIs("LegitSmart"));
+        intaveReduceFactor.visibleWhen(() -> modeIs("IntaveReduce"));
+        intaveReduceHurtTime.visibleWhen(() -> modeIs("IntaveReduce"));
+        chance.visibleWhen(() -> modeIsAny("Legit", "LegitTest", "LegitSmart"));
+        horizontal.visibleWhen(() -> modeIsAny("Standard", "BufferAbuse", "Redesky", "Vulcan"));
+        vertical.visibleWhen(() -> modeIsAny("Standard", "BufferAbuse", "Redesky", "Vulcan"));
+        explosionHorizontal.visibleWhen(() -> modeIs("Standard"));
+        explosionVertical.visibleWhen(() -> modeIs("Standard"));
+        grimReduceJumpLimit.visibleWhen(() -> modeIs("Grimtest"));
+
+        modes.add(new OMDelayVelocity(this));
+        modes.add(new ReverseVelocity(this));
+        modes.add(new LegitTestVelocity(this));
+        modes.add(new LegitSmartVelocity(this));
+        modes.add(new IntaveReduceVelocity(this));
+        modes.add(new GrimTestVelocity(this));
+        modes.add(new JumpResetVelocity(this));
+        modes.add(new StandardVelocity(this));
+        modes.add(new AACVelocity(this));
+        modes.add(new BounceVelocity(this));
+        modes.add(new BufferAbuseVelocity(this));
+        modes.add(new DelayVelocity(this));
+        modes.add(new GrimVelocity(this));
+        modes.add(new GrimReduceVelocity(this));
+        modes.add(new GroundVelocity(this));
+        modes.add(new IntaveVelocity(this));
+        modes.add(new KarhuVelocity(this));
+        modes.add(new LegitVelocity(this));
+        modes.add(new MMCVelocity(this));
+        modes.add(new MatrixVelocity(this));
+        modes.add(new RedeskyVelocity(this));
+        modes.add(new TickVelocity(this));
+        modes.add(new UniversoCraftVelocity(this));
+        modes.add(new VulcanVelocity(this));
+        modes.add(new WatchdogPredictionVelocity(this));
+        modes.add(new WatchdogVelocity(this));
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // External API
-    // ────────────────────────────────────────────────────────────────
+    public VelocityMode getActiveMode() {
+        String current = mode.getCurrentMode();
+        for (VelocityMode m : modes) {
+            if (m.getName().equals(current))
+                return m;
+        }
+        return modes.isEmpty() ? null : modes.get(0);
+    }
 
-    /** True when enabled and configured to reduce knockback in the active mode. */
+    /** True when enabled — OpenMiau treats Velocity as always reducing when on. */
     public boolean reducesKnockback() {
-        if (!isEnabled())
-            return false;
-        if (mode.getValue() == 0)
-            return horizontal.getValue() < 100.0f || vertical.getValue() < 100.0f;
-        return true; // JumpReset and Intave modes always reduce via jump + attack reduction
+        return isEnabled();
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // Module lifecycle
-    // ────────────────────────────────────────────────────────────────
+    public boolean isInLiquidOrWeb() {
+        EntityPlayerSP player = Mc.player();
+        if (player == null)
+            return false;
+        return player.isInWater() || player.isInLava()
+                || player.isInsideOfMaterial(Material.web);
+    }
+
+    /** On ground; KillAura autoblock gate deferred until KillAuraModule exposes shouldAutoBlock. */
+    public boolean canDelay() {
+        EntityPlayerSP player = Mc.player();
+        return player != null && player.onGround;
+    }
+
+    public void noteAttack(Object target) {
+        if (!isEnabled())
+            return;
+        getActiveMode().onAttack(target);
+    }
+
+    public static void patchMovementInput(Object movInput) {
+        Module mod = ModuleManager.INSTANCE.getModule("Velocity");
+        if (!(mod instanceof VelocityModule))
+            return;
+        VelocityModule vm = (VelocityModule) mod;
+        if (!vm.isEnabled() || movInput == null)
+            return;
+        vm.getActiveMode().onMoveInput((MovementInput) movInput);
+    }
+
+    public static void patchStrafe(StrafeEvent event) {
+        Module mod = ModuleManager.INSTANCE.getModule("Velocity");
+        if (!(mod instanceof VelocityModule))
+            return;
+        VelocityModule vm = (VelocityModule) mod;
+        if (!vm.isEnabled() || event == null)
+            return;
+        vm.getActiveMode().onStrafe(event);
+    }
+
+    public static void patchJump(JumpEvent event) {
+        Module mod = ModuleManager.INSTANCE.getModule("Velocity");
+        if (!(mod instanceof VelocityModule))
+            return;
+        VelocityModule vm = (VelocityModule) mod;
+        if (!vm.isEnabled() || event == null)
+            return;
+        vm.getActiveMode().onJump(event);
+    }
 
     @Override
     public void onEnable() {
-        resetJumpResetState();
-        lastAttackMs = 0;
         PacketEvents.register(this);
+        getActiveMode().onEnable();
     }
 
     @Override
     public void onDisable() {
         PacketEvents.unregister(this);
-        resetJumpResetState();
-        lastAttackMs = 0;
+        getActiveMode().onDisable();
+        resetSharedState();
+        delayQueue.clear();
+        Mc.setTimerSpeed(1.0f);
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // Tick handlers
-    // ────────────────────────────────────────────────────────────────
-
-    @Override
-    public void onTick() {
-        EntityPlayerSP player = Mc.player();
-        if (player == null)
-            return;
-
-        if (mode.getValue() == 0) {
-            int hurtTime = player.hurtTime;
-            if (hurtTime <= 0)
-                return;
-
-            if (random.nextInt(100) >= chance.getValue())
-                return;
-
-            double hMul = horizontal.getValue() / 100.0;
-            double vMul = vertical.getValue() / 100.0;
-
-            player.motionX *= hMul;
-            player.motionZ *= hMul;
-            player.motionY *= vMul;
-        }
-        // JumpReset and Intave modes have no onTick work — they operate through
-        // patchMovementInput (called from BridgeAssistModule) + packet hooks in onSend/onReceive.
-    }
-
+    /** PRE — early client tick ({@code ClientTickEvent} START). */
     @Override
     public void onTickStart() {
-        if (mode.getValue() != 1 && mode.getValue() != 2)
+        if (!isEnabled())
             return;
-
-        EntityPlayerSP player = Mc.player();
-        if (player == null)
-            return;
-
-        int hurtTime = player.hurtTime;
-        if (hurtTime <= 0) {
-            hasHitKnockback = false;
-            isFallDamage = false;
-            ticksSinceKnockback = 0;
-        }
+        getActiveMode().onUpdate(true);
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // PacketListener
-    // ────────────────────────────────────────────────────────────────
-
+    /** POST — late client tick ({@code ClientTickEvent} END). */
     @Override
-    public boolean onSend(Object packet) {
-        // ── Intave mode: reduce-on-attack ──
-        if (mode.getValue() == 2 && PacketHelper.isAttackUseEntity(packet)) {
-            EntityPlayerSP player = Mc.player();
-            if (player != null) {
-                int hurtTime = player.hurtTime;
-                long now = System.currentTimeMillis();
-                if (hurtTime >= intaveHurtMin.getValue().intValue()
-                        && hurtTime <= intaveHurtMax.getValue().intValue()
-                        && (now - lastAttackMs) <= intaveCooldownMs.getValue().longValue()) {
-                    double factor = intaveFactor.getValue();
-                    player.motionX *= factor;
-                    player.motionZ *= factor;
-                }
-                lastAttackMs = now;
-            }
-        }
-        return false;
+    public void onTick() {
+        if (!isEnabled())
+            return;
+        getActiveMode().onUpdate(false);
     }
 
     @Override
     public boolean onReceive(Object packet) {
-        if (mode.getValue() != 1 && mode.getValue() != 2)
+        if (!isEnabled())
             return false;
+        return getActiveMode().onReceive(packet);
+    }
 
-        if (PacketHelper.isExplosion(packet)) {
-            PacketHelper.noteInboundExplosion();
+    @Override
+    public boolean onSend(Object packet) {
+        if (!isEnabled())
             return false;
-        }
+        return getActiveMode().onSend(packet);
+    }
 
-        if (!PacketHelper.isEntityVelocity(packet))
-            return false;
+    private void resetSharedState() {
+        chanceCounter = 0;
+        delayChanceCounter = 0;
+        pendingExplosion = false;
+        allowNext = true;
+        jumpFlag = false;
+        reverseFlag = false;
+        delayActive = false;
+        shouldJump = false;
+        jumpCooldown = 0;
+        hasReceivedVelocity = false;
+        legitSmartJumpCount = 0;
+        intaveTick = 0;
+        intaveDamageTick = 0;
+    }
 
-        EntityPlayerSP player = Mc.player();
-        if (player == null)
-            return false;
-        if (PacketHelper.velocityEntityId(packet) != Mc.entityId(player))
-            return false;
+    private boolean modeIs(String name) {
+        return name.equals(mode.getCurrentMode());
+    }
 
-        int motionX = PacketHelper.velocityMotionX(packet);
-        int motionY = PacketHelper.velocityMotionY(packet);
-        int motionZ = PacketHelper.velocityMotionZ(packet);
-
-        isFallDamage = PacketHelper.isFallDamageVelocity(motionX, motionY, motionZ);
-        lastHorizontalKb = horizontalKbMagnitude(motionX, motionZ);
-        boolean meleeKb = PacketHelper.isMeleeKnockbackVelocity(motionX, motionY, motionZ)
-                && !PacketHelper.isRecentExplosionKnockback();
-
-        if (meleeKb && !disableOnHit.getValue()) {
-            hasHitKnockback = true;
-            ticksSinceKnockback = 0;
+    private boolean modeIsAny(String... names) {
+        String current = mode.getCurrentMode();
+        for (String n : names) {
+            if (n.equals(current))
+                return true;
         }
         return false;
-    }
-
-    // ────────────────────────────────────────────────────────────────
-    // Static entry point (called from MovementInputHook)
-    // ────────────────────────────────────────────────────────────────
-
-    /**
-     * Called from {@code MovementInputHook.afterUpdatePlayerMoveState} (Forge
-     * mixin at {@code MovementInputFromOptions.updatePlayerMoveState} RETURN).
-     * Acts in JumpReset and Intave modes.
-     */
-    public static void patchMovementInput(Object movInput) {
-        Module mod = ModuleManager.INSTANCE.getModule("Velocity");
-        if (!(mod instanceof VelocityModule)) {
-            return;
-        }
-        VelocityModule vm = (VelocityModule) mod;
-        if (!vm.isEnabled() || (vm.mode.getValue() != 1 && vm.mode.getValue() != 2))
-            return;
-        vm.applyJumpAtMovementInput(movInput);
-    }
-
-    // ────────────────────────────────────────────────────────────────
-    // JumpReset internals (moved from JumpResetModule)
-    // ────────────────────────────────────────────────────────────────
-
-    private void applyJumpAtMovementInput(Object movInput) {
-        EntityPlayerSP player = Mc.player();
-        if (player == null || movInput == null)
-            return;
-
-        if (disableInWater.getValue() && player.isInWater())
-            return;
-
-        int hurtTime = player.hurtTime;
-        boolean onGround = player.onGround;
-        boolean sprinting = passesSprintGate(player);
-
-        incrementTicksSinceKnockback();
-
-        if (hurtTime != HURT_TICK_TARGET) {
-            return;
-        }
-        if (!onGround) {
-            return;
-        }
-        if (!sprinting) {
-            return;
-        }
-        if (isFallDamage) {
-            return;
-        }
-        if (!hasHitKnockback) {
-            return;
-        }
-        if (!passesHorizontalGate()) {
-            return;
-        }
-        if (!passesTickDelay()) {
-            return;
-        }
-        if (!passesChance()) {
-            return;
-        }
-
-        MovementInput input = (MovementInput) movInput;
-        input.jump = true;
-        hasHitKnockback = false;
-        ticksSinceKnockback = 0;
-    }
-
-    private void resetJumpResetState() {
-        isFallDamage = false;
-        hasHitKnockback = false;
-        lastHorizontalKb = 0.0f;
-        ticksSinceKnockback = 0;
-        lastLimitTick = -1;
-    }
-
-    private void incrementTicksSinceKnockback() {
-        if (!hasHitKnockback)
-            return;
-        EntityPlayerSP player = Mc.player();
-        if (player == null)
-            return;
-        int tick = player.ticksExisted;
-        if (tick == lastLimitTick)
-            return;
-        lastLimitTick = tick;
-        ticksSinceKnockback++;
-    }
-
-    private boolean passesTickDelay() {
-        return ticksSinceKnockback >= tickDelay.getValue().intValue();
-    }
-
-    private boolean passesHorizontalGate() {
-        if (!jumpHorizontal.getValue())
-            return true;
-        if (minHorizontalKb.getValue() <= 0.001f)
-            return lastHorizontalKb > 0.001f;
-        return lastHorizontalKb >= minHorizontalKb.getValue();
-    }
-
-    private boolean passesChance() {
-        float c = jumpChance.getValue();
-        if (c >= 100.0f)
-            return true;
-        return random.nextInt(100) <= c;
-    }
-
-    private static float horizontalKbMagnitude(int motionX, int motionZ) {
-        double hx = motionX / 8000.0;
-        double hz = motionZ / 8000.0;
-        return (float) Math.sqrt(hx * hx + hz * hz);
-    }
-
-    private boolean passesSprintGate(EntityPlayerSP player) {
-        if (!sprintingOnly.getValue())
-            return true;
-
-        Module sprint = ModuleManager.INSTANCE.getModule("Sprint");
-        if (sprint != null && sprint.isEnabled())
-            return true;
-        if (player == null)
-            return false;
-
-        if (player.isSprinting())
-            return true;
-
-        return Mc.settings().keyBindSprint.isKeyDown();
     }
 }

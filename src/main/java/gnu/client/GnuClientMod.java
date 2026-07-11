@@ -11,6 +11,7 @@ import gnu.client.module.modules.combat.AntiBotModule;
 import gnu.client.module.modules.combat.AutoClickerModule;
 import gnu.client.module.modules.combat.HitSelectModule;
 import gnu.client.module.modules.combat.KillAuraModule;
+import gnu.client.module.modules.combat.MoreKBModule;
 import gnu.client.module.modules.combat.ReachModule;
 import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.module.modules.combat.WTapModule;
@@ -99,6 +100,7 @@ public class GnuClientMod {
         safeRegister(new Settings());
         safeRegister(new ClickGuiModule());
         safeRegister(new WTapModule());
+        safeRegister(new MoreKBModule());
         safeRegister(new SprintModule());
         safeRegister(new NoSlowModule());
         safeRegister(new BridgeAssistModule());

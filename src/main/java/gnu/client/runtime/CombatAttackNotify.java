@@ -3,6 +3,7 @@ package gnu.client.runtime;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.modules.combat.ReachModule;
+import gnu.client.module.modules.combat.MoreKBModule;
 import gnu.client.module.modules.combat.WTapModule;
 import gnu.client.module.modules.network.BacktrackModule;
 import gnu.client.runtime.mc.Mc;
@@ -26,6 +27,10 @@ public final class CombatAttackNotify {
         Module wTap = ModuleManager.INSTANCE.getModule("W Tap");
         if (wTap instanceof WTapModule && wTap.isEnabled() && target instanceof Entity)
             ((WTapModule) wTap).noteForgeAttack((Entity) target);
+
+        Module moreKb = ModuleManager.INSTANCE.getModule("MoreKB");
+        if (moreKb instanceof MoreKBModule && moreKb.isEnabled() && target instanceof Entity)
+            ((MoreKBModule) moreKb).noteForgeAttack((Entity) target);
     }
 
     public static void tickReachOnLmbEdge() {

@@ -1,6 +1,7 @@
 package gnu.client.runtime;
 
 import gnu.client.module.modules.combat.KillAuraModule;
+import gnu.client.module.modules.combat.MoreKBModule;
 import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.module.modules.combat.WTapModule;
 import gnu.client.module.modules.movement.StasisModule;
@@ -21,6 +22,7 @@ public final class MovementInputHook {
         // JumpReset / WTap must run even if BridgeAssist field cache fails.
         VelocityModule.patchMovementInput(movementInput);
         WTapModule.patchMovementInput(movementInput);
+        MoreKBModule.patchMovementInput(movementInput);
         ScaffoldModule.patchMovementInput(movementInput);
         KillAuraModule.patchMovementInput(movementInput);
         ScriptManager.instance().patchMovementInput(movementInput);
