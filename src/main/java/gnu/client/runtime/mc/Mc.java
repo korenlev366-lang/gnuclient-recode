@@ -779,7 +779,8 @@ public final class Mc {
     public static void sendReleaseUseItem(EntityPlayer player) {
         if (player == null)
             return;
-        PacketUtil.sendPacket(new C07PacketPlayerDigging(
+        // addToSendQueue (not PacketUtil.sendPacket) so BlinkManager can hold when AUTO_BLOCK.
+        addToSendQueue(new C07PacketPlayerDigging(
                 C07PacketPlayerDigging.Action.RELEASE_USE_ITEM,
                 BlockPos.ORIGIN,
                 EnumFacing.DOWN));
@@ -788,7 +789,8 @@ public final class Mc {
     public static void sendUseItemBlockPlacement(ItemStack stack) {
         if (stack == null)
             return;
-        PacketUtil.sendPacket(new C08PacketPlayerBlockPlacement(stack));
+        // addToSendQueue (not PacketUtil.sendPacket) so BlinkManager can hold when AUTO_BLOCK.
+        addToSendQueue(new C08PacketPlayerBlockPlacement(stack));
     }
 
     public static void startSwordBlock(EntityPlayer player, ItemStack stack) {

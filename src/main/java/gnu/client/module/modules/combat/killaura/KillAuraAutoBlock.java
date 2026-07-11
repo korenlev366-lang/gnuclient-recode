@@ -9,7 +9,6 @@ import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.runtime.BlinkManager;
 import gnu.client.runtime.BlinkModules;
 import gnu.client.runtime.mc.Mc;
-import gnu.client.runtime.packet.PacketUtil;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.multiplayer.PlayerControllerMP;
 import net.minecraft.entity.EntityLivingBase;
@@ -168,7 +167,7 @@ public final class KillAuraAutoBlock {
                             int slot = findEmptySlot(item);
                             Mc.sendHeldItemChange(slot);
                             Mc.sendHeldItemChange(item);
-                            blockingState = false;
+                            clearBlockAfterSlotChange(player);
                             swap = true;
                             blockTick = 1;
                         }
@@ -202,7 +201,7 @@ public final class KillAuraAutoBlock {
                                                     randomSlot = random.nextInt(9);
                                                 Mc.sendHeldItemChange(randomSlot);
                                                 Mc.sendHeldItemChange(p.inventory.currentItem);
-                                                blockingState = false;
+                                                clearBlockAfterSlotChange(p);
                                             }
                                         }
                                         stopBlock();
@@ -273,7 +272,7 @@ public final class KillAuraAutoBlock {
                                         int slot = findEmptySlot(item);
                                         Mc.sendHeldItemChange(slot);
                                         setCurrentPlayerItem(slot);
-                                        blockingState = false;
+                                        clearBlockAfterSlotChange(player);
                                         attack = false;
                                     }
                                     if (ctx.attackDelayMs <= 50L)
@@ -318,7 +317,7 @@ public final class KillAuraAutoBlock {
                                     } else if (ctx.attackDelayMs <= 50L) {
                                         Mc.sendHeldItemChange(swordsSlot);
                                         setCurrentPlayerItem(swordsSlot);
-                                        blockingState = false;
+                                        clearBlockAfterSlotChange(player);
                                         startBlock(player.inventory.getStackInSlot(swordsSlot));
                                         attack = false;
                                         blockTick = 0;
@@ -452,6 +451,13 @@ public final class KillAuraAutoBlock {
         blockingState = false;
     }
 
+    /** OpenMyau onPacket C09: clear blockingState and stop client use. */
+    private void clearBlockAfterSlotChange(EntityPlayerSP player) {
+        blockingState = false;
+        if (player != null)
+            player.stopUsingItem();
+    }
+
     private void sendUseItem() {
         PlayerControllerMP controller = Mc.controller();
         if (controller instanceof IAccessorPlayerControllerMP)
@@ -472,14 +478,16 @@ public final class KillAuraAutoBlock {
         if (controller instanceof IAccessorPlayerControllerMP)
             ((IAccessorPlayerControllerMP) controller).invokeSyncCurrentPlayItem();
         Vec3 hit = mop.hitVec;
-        PacketUtil.sendPacket(new C02PacketUseEntity(
+        Mc.addToSendQueue(new C02PacketUseEntity(
                 target,
                 new Vec3(hit.xCoord - target.posX, hit.yCoord - target.posY, hit.zCoord - target.posZ)));
-        PacketUtil.sendPacket(new C02PacketUseEntity(target, C02PacketUseEntity.Action.INTERACT));
+        Mc.addToSendQueue(new C02PacketUseEntity(target, C02PacketUseEntity.Action.INTERACT));
         EntityPlayerSP player = Mc.player();
         if (player == null)
             return;
         ItemStack held = player.getHeldItem();
+        if (held == null)
+            return;
         Mc.startSwordBlock(player, held);
         blockingState = true;
     }
