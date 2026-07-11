@@ -1,17 +1,24 @@
 package gnu.client.ui;
 
+import gnu.client.GnuClientMod;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.renderer.OpenGlHelper;
 import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.client.renderer.WorldRenderer;
 import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
+import net.minecraft.util.ResourceLocation;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL13;
 import org.lwjgl.opengl.GL20;
 
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Deque;
 
@@ -31,15 +38,16 @@ public final class UiKit {
     public static final int SUCCESS = 0xFF57D7A0;
     public static final int DANGER = 0xFFFF7187;
 
-    public static final float RADIUS_PANEL = 10f;
-    public static final float RADIUS_ROW = 7f;
-    public static final float RADIUS_PILL = 5f;
-    public static final float RADIUS_TOAST = 9f;
+    public static final float RADIUS_PANEL = 13f;
+    public static final float RADIUS_ROW = 8f;
+    public static final float RADIUS_PILL = 7f;
+    public static final float RADIUS_TOAST = 12f;
 
-    public static final float ROW_HEIGHT = 18f;
-    public static final float COLUMN_WIDTH = 132f;
-    public static final float TOAST_MAX_WIDTH = 240f;
-    public static final float TOAST_MAX_HEIGHT = 48f;
+    /** Module row header (name + bind + toggle) — mockup ~37px. */
+    public static final float ROW_HEIGHT = 34f;
+    public static final float COLUMN_WIDTH = 156f;
+    public static final float TOAST_MAX_WIDTH = 260f;
+    public static final float TOAST_MAX_HEIGHT = 52f;
 
     public static final float DURATION_FAST_MS = 180f;
     public static final float DURATION_MED_MS = 220f;
@@ -347,9 +355,11 @@ public final class UiKit {
             int program = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
             int matrixMode = GL11.glGetInteger(GL11.GL_MATRIX_MODE);
             // GL_FRAMEBUFFER_BINDING (0x8CA6) — same value for EXT/ARB/core.
+            // Track binding whenever the extension exists: UiBlur uses private FBOs even
+            // when video-settings "Use FBOs" (isFramebufferEnabled) is off.
             final int GL_FRAMEBUFFER_BINDING = 0x8CA6;
             int fbo = 0;
-            if (OpenGlHelper.isFramebufferEnabled()) {
+            if (OpenGlHelper.framebufferSupported) {
                 fbo = GL11.glGetInteger(GL_FRAMEBUFFER_BINDING);
             }
 
@@ -374,7 +384,7 @@ public final class UiKit {
                 GL11.glPopMatrix();
                 GL11.glMatrixMode(matrixMode);
 
-                if (OpenGlHelper.isFramebufferEnabled()) {
+                if (OpenGlHelper.framebufferSupported) {
                     OpenGlHelper.glBindFramebuffer(OpenGlHelper.GL_FRAMEBUFFER, fbo);
                 }
                 GL11.glViewport(viewport.get(0), viewport.get(1), viewport.get(2), viewport.get(3));
@@ -423,9 +433,23 @@ public final class UiKit {
         RoundedPanel.draw(x, y, w, h, radius, argb);
     }
 
-    /** Translucent rounded rectangle via Tessellator (no external deps). */
+    /**
+     * Soft anti-aliased rounded rect. Prefers an SDF shader; falls back to a
+     * cull-safe Tessellator path if shaders fail.
+     */
     public static final class RoundedPanel {
-        private static final int CORNER_STEPS = 10;
+        private static final ResourceLocation VERT =
+                new ResourceLocation(GnuClientMod.MOD_ID, "shaders/ui_round.vert");
+        private static final ResourceLocation FRAG =
+                new ResourceLocation(GnuClientMod.MOD_ID, "shaders/ui_round.frag");
+        private static final int CORNER_STEPS = 18;
+
+        private static boolean probed;
+        private static boolean shaderOk;
+        private static int program;
+        private static int uniSize;
+        private static int uniRadius;
+        private static int uniColor;
 
         private RoundedPanel() {
         }
@@ -435,11 +459,122 @@ public final class UiKit {
                 return;
             }
             float r = Math.max(0f, Math.min(radius, Math.min(w, h) * 0.5f));
+            if (ensureShader()) {
+                drawShader(x, y, w, h, r, argb);
+            } else {
+                drawTessellator(x, y, w, h, r, argb);
+            }
+        }
+
+        private static boolean ensureShader() {
+            if (probed) {
+                return shaderOk;
+            }
+            probed = true;
+            try {
+                Minecraft mc = Minecraft.getMinecraft();
+                if (mc == null || mc.getResourceManager() == null) {
+                    probed = false;
+                    return false;
+                }
+                int vs = compile(GL20.GL_VERTEX_SHADER, readResource(VERT));
+                int fs = compile(GL20.GL_FRAGMENT_SHADER, readResource(FRAG));
+                if (vs == 0 || fs == 0) {
+                    return false;
+                }
+                program = GL20.glCreateProgram();
+                GL20.glAttachShader(program, vs);
+                GL20.glAttachShader(program, fs);
+                GL20.glLinkProgram(program);
+                GL20.glDeleteShader(vs);
+                GL20.glDeleteShader(fs);
+                if (GL20.glGetProgrami(program, GL20.GL_LINK_STATUS) == GL11.GL_FALSE) {
+                    GL20.glDeleteProgram(program);
+                    program = 0;
+                    return false;
+                }
+                uniSize = GL20.glGetUniformLocation(program, "u_size");
+                uniRadius = GL20.glGetUniformLocation(program, "u_radius");
+                uniColor = GL20.glGetUniformLocation(program, "u_color");
+                shaderOk = true;
+                return true;
+            } catch (Throwable t) {
+                shaderOk = false;
+                program = 0;
+                return false;
+            }
+        }
+
+        private static void drawShader(float x, float y, float w, float h, float radius, int argb) {
             float a = ((argb >>> 24) & 0xFF) / 255f;
             float red = ((argb >> 16) & 0xFF) / 255f;
             float green = ((argb >> 8) & 0xFF) / 255f;
             float blue = (argb & 0xFF) / 255f;
 
+            boolean alphaWas = GL11.glIsEnabled(GL11.GL_ALPHA_TEST);
+            boolean blendWas = GL11.glIsEnabled(GL11.GL_BLEND);
+            boolean texWas = GL11.glIsEnabled(GL11.GL_TEXTURE_2D);
+            int prevProg = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
+
+            GlStateManager.disableAlpha();
+            GlStateManager.enableBlend();
+            GlStateManager.tryBlendFuncSeparate(770, 771, 1, 0);
+            GlStateManager.disableTexture2D();
+            GlStateManager.color(1f, 1f, 1f, 1f);
+
+            GL20.glUseProgram(program);
+            GL20.glUniform2f(uniSize, w, h);
+            GL20.glUniform1f(uniRadius, radius);
+            GL20.glUniform4f(uniColor, red, green, blue, a);
+
+            // 1px pad so AA fringe isn't clipped.
+            float pad = 1f;
+            float x0 = x - pad;
+            float y0 = y - pad;
+            float x1 = x + w + pad;
+            float y1 = y + h + pad;
+            float u0 = -pad / w;
+            float v0 = -pad / h;
+            float u1 = 1f + pad / w;
+            float v1 = 1f + pad / h;
+
+            Tessellator tess = Tessellator.getInstance();
+            WorldRenderer wr = tess.getWorldRenderer();
+            wr.begin(GL11.GL_QUADS, DefaultVertexFormats.POSITION_TEX);
+            wr.pos(x0, y1, 0.0).tex(u0, v1).endVertex();
+            wr.pos(x1, y1, 0.0).tex(u1, v1).endVertex();
+            wr.pos(x1, y0, 0.0).tex(u1, v0).endVertex();
+            wr.pos(x0, y0, 0.0).tex(u0, v0).endVertex();
+            tess.draw();
+
+            GL20.glUseProgram(prevProg);
+            if (texWas) {
+                GlStateManager.enableTexture2D();
+            } else {
+                GlStateManager.disableTexture2D();
+            }
+            if (alphaWas) {
+                GlStateManager.enableAlpha();
+            } else {
+                GlStateManager.disableAlpha();
+            }
+            if (!blendWas) {
+                GlStateManager.disableBlend();
+            }
+            GlStateManager.color(1f, 1f, 1f, 1f);
+        }
+
+        /** Cull-safe fan path used when the SDF shader is unavailable. */
+        private static void drawTessellator(float x, float y, float w, float h, float radius, int argb) {
+            float a = ((argb >>> 24) & 0xFF) / 255f;
+            float red = ((argb >> 16) & 0xFF) / 255f;
+            float green = ((argb >> 8) & 0xFF) / 255f;
+            float blue = (argb & 0xFF) / 255f;
+
+            boolean cull = GL11.glIsEnabled(GL11.GL_CULL_FACE);
+            boolean alphaWas = GL11.glIsEnabled(GL11.GL_ALPHA_TEST);
+            GlStateManager.disableCull();
+            GlStateManager.disableAlpha();
             GlStateManager.disableTexture2D();
             GlStateManager.enableBlend();
             GlStateManager.tryBlendFuncSeparate(770, 771, 1, 0);
@@ -448,18 +583,24 @@ public final class UiKit {
             Tessellator tess = Tessellator.getInstance();
             WorldRenderer wr = tess.getWorldRenderer();
 
-            // Center + side strips as triangle fan from center is overkill; use quads + fans.
-            drawRect(wr, tess, x + r, y, x + w - r, y + h, red, green, blue, a);
-            drawRect(wr, tess, x, y + r, x + r, y + h - r, red, green, blue, a);
-            drawRect(wr, tess, x + w - r, y + r, x + w, y + h - r, red, green, blue, a);
+            drawRect(wr, tess, x + radius, y, x + w - radius, y + h, red, green, blue, a);
+            drawRect(wr, tess, x, y + radius, x + radius, y + h - radius, red, green, blue, a);
+            drawRect(wr, tess, x + w - radius, y + radius, x + w, y + h - radius, red, green, blue, a);
 
-            if (r > 0f) {
-                drawCorner(wr, tess, x + r, y + r, r, 180.0, 270.0, red, green, blue, a);
-                drawCorner(wr, tess, x + w - r, y + r, r, 270.0, 360.0, red, green, blue, a);
-                drawCorner(wr, tess, x + w - r, y + h - r, r, 0.0, 90.0, red, green, blue, a);
-                drawCorner(wr, tess, x + r, y + h - r, r, 90.0, 180.0, red, green, blue, a);
+            if (radius > 0f) {
+                // Clockwise arcs in Y-down GUI space so they survive default CCW cull if re-enabled.
+                drawCorner(wr, tess, x + radius, y + radius, radius, 270.0, 180.0, red, green, blue, a);
+                drawCorner(wr, tess, x + w - radius, y + radius, radius, 360.0, 270.0, red, green, blue, a);
+                drawCorner(wr, tess, x + w - radius, y + h - radius, radius, 90.0, 0.0, red, green, blue, a);
+                drawCorner(wr, tess, x + radius, y + h - radius, radius, 180.0, 90.0, red, green, blue, a);
             }
 
+            if (cull) {
+                GlStateManager.enableCull();
+            }
+            if (alphaWas) {
+                GlStateManager.enableAlpha();
+            }
             GlStateManager.enableTexture2D();
             GlStateManager.color(1f, 1f, 1f, 1f);
         }
@@ -490,6 +631,32 @@ public final class UiKit {
                         .color(r, g, b, a).endVertex();
             }
             tess.draw();
+        }
+
+        private static int compile(int type, String src) {
+            int id = GL20.glCreateShader(type);
+            GL20.glShaderSource(id, src);
+            GL20.glCompileShader(id);
+            if (GL20.glGetShaderi(id, GL20.GL_COMPILE_STATUS) == GL11.GL_FALSE) {
+                GL20.glDeleteShader(id);
+                return 0;
+            }
+            return id;
+        }
+
+        private static String readResource(ResourceLocation loc) throws Exception {
+            InputStream in = Minecraft.getMinecraft().getResourceManager().getResource(loc).getInputStream();
+            try {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line).append('\n');
+                }
+                return sb.toString();
+            } finally {
+                in.close();
+            }
         }
     }
 }

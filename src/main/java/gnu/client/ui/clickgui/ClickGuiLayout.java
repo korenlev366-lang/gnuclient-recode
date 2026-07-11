@@ -17,7 +17,7 @@ public final class ClickGuiLayout {
     public static final int VERSION = 1;
     private static final int FIRST_X = 8;
     private static final int FIRST_Y = 8;
-    private static final int COLUMN_STEP = 140;
+    private static final int COLUMN_STEP = 168;
 
     private final EnumMap<Category, Column> columns;
 

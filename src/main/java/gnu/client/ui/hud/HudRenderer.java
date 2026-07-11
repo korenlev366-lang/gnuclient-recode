@@ -30,16 +30,16 @@ import java.util.Set;
  */
 public final class HudRenderer {
 
-    private static final float ARRAY_MARGIN = 10f;
-    private static final float ARRAY_GAP = 2f;
-    private static final float ARRAY_PAD_X = 8f;
-    private static final float ARRAY_PAD_L = 7f;
-    private static final float ARRAY_MIN_H = 16f;
+    private static final float ARRAY_MARGIN = 12f;
+    private static final float ARRAY_GAP = 3f;
+    private static final float ARRAY_PAD_X = 10f;
+    private static final float ARRAY_PAD_L = 9f;
+    private static final float ARRAY_MIN_H = 18f;
     private static final float ARRAY_ACCENT_W = 2f;
-    private static final float TOAST_GAP = 5f;
-    private static final float TOAST_MARGIN = 10f;
-    private static final float TOAST_ICON = 22f;
-    private static final float TOAST_PAD = 8f;
+    private static final float TOAST_GAP = 6f;
+    private static final float TOAST_MARGIN = 12f;
+    private static final float TOAST_ICON = 26f;
+    private static final float TOAST_PAD = 10f;
     private static final int MAX_SUFFIX_LEN = 24;
     private static final int MAX_SUFFIX_PARTS = 2;
     private static final float SETTLE_EPS = 0.01f;
@@ -373,10 +373,8 @@ public final class HudRenderer {
             w = UiKit.PixelAlign.snap(w, scale);
             h = UiKit.PixelAlign.snap(h, scale);
 
-            int bg = UiKit.withAlpha(0xB80C0F16, vis * 0.92f);
+            int bg = UiKit.withAlpha(0xCC0C0F16, vis * 0.94f);
             UiKit.drawRoundedPanel(x, y, w, h, UiKit.RADIUS_PILL, bg);
-            int line = UiKit.withAlpha(UiKit.LINE, vis);
-            UiKit.drawRoundedPanel(x, y, w, 1f, 0f, line);
 
             float accentX = x + w - 3f - ARRAY_ACCENT_W;
             float accentY = y + 4f;

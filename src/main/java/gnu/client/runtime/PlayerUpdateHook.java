@@ -3,7 +3,7 @@ package gnu.client.runtime;
 import gnu.client.mixin.impl.accessors.IAccessorEntityPlayerSP;
 import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.movement.StasisModule;
-import gnu.client.module.modules.player.ScaffoldModule;
+import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.runtime.mc.Mc;
 import net.minecraft.client.entity.EntityPlayerSP;
 
@@ -78,10 +78,11 @@ public final class PlayerUpdateHook {
         if (!isLocal(player))
             return;
         KillAuraModule.onBeforeWalkingPrepare(player);
+        KillAuraModule.onBeforeWalkingAttack(player);
+        // Scaffold last: C09+C08 then C03 with place look (1.8 Grim Post / RotationPlace queue).
+        ScaffoldModule.onBeforeWalkingPlace(player);
         if (overrideActive)
             beginRotationSwap(player);
-        ScaffoldModule.onBeforeWalkingPlace(player);
-        KillAuraModule.onBeforeWalkingAttack(player);
     }
 
     /** True between {@link #beginRotationSwap} and {@code onUpdate} return — rotation sent/will send this tick. */
@@ -93,7 +94,7 @@ public final class PlayerUpdateHook {
         return overrideActive;
     }
 
-    /** After {@code onUpdateWalkingPlayer} — post-attack hooks only (no sprint-suppress tick). */
+    /** After {@code onUpdateWalkingPlayer} — post-attack hooks only. */
     public static void onAfterWalkingPlayer(Object player) {
         if (!isLocal(player))
             return;

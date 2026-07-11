@@ -16,6 +16,9 @@ public interface IAccessorPlayerControllerMP {
     @Accessor("currentPlayerItem")
     int getCurrentPlayerItem();
 
+    @Accessor("currentPlayerItem")
+    void setCurrentPlayerItem(int slot);
+
     @Invoker("syncCurrentPlayItem")
     void invokeSyncCurrentPlayItem();
 }

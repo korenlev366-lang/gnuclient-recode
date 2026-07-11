@@ -27,7 +27,7 @@ import gnu.client.module.modules.network.PingFixModule;
 import gnu.client.module.modules.player.BridgeAssistModule;
 import gnu.client.module.modules.player.DelayRemoverModule;
 import gnu.client.module.modules.player.FastPlaceModule;
-import gnu.client.module.modules.player.ScaffoldModule;
+import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.module.impl.client.Settings;
 import gnu.client.module.modules.settings.ClickGuiModule;
 import gnu.client.module.modules.visual.BedEspModule;

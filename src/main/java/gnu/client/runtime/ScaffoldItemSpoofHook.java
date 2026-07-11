@@ -2,7 +2,7 @@ package gnu.client.runtime;
 
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
-import gnu.client.module.modules.player.ScaffoldModule;
+import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.runtime.mc.Mc;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.entity.player.InventoryPlayer;

@@ -19,9 +19,9 @@ import java.util.Locale;
 public final class CategoryColumn {
 
     public static final float WIDTH = UiKit.COLUMN_WIDTH;
-    public static final float HEADER_H = 24f;
-    public static final float BODY_PAD = 4f;
-    public static final float MAX_BODY_H = 240f;
+    public static final float HEADER_H = 42f;
+    public static final float BODY_PAD = 6f;
+    public static final float MAX_BODY_H = 320f;
 
     private final Category category;
     private final List<ModuleRow> rows = new ArrayList<ModuleRow>();
@@ -294,17 +294,34 @@ public final class CategoryColumn {
             UiKit.drawRoundedPanel(px, py, pw, ph, UiKit.RADIUS_PANEL,
                     UiKit.withAlpha(UiKit.SURFACE, alpha));
         }
+        // Soft top highlight strip
+        UiKit.drawRoundedPanel(px + 1f, py + 1f, pw - 2f, HEADER_H - 1f, UiKit.RADIUS_PANEL - 1f,
+                UiKit.withAlpha(0x0AFFFFFF, alpha));
+        // Header separator
+        UiKit.drawRoundedPanel(px + 10f, py + HEADER_H - 1f, pw - 20f, 1f, 0f,
+                UiKit.withAlpha(UiKit.LINE, alpha));
 
-        // Header
-        String title = category.name();
-        float titleY = UiKit.PixelAlign.snap(py + (HEADER_H - UiFont.height()) * 0.5f, scale);
+        // Header title + count badge
+        String title = prettyCategory(category);
+        float titleY = UiKit.PixelAlign.snap(py + 12f, scale);
         UiFont.draw(title, UiKit.PixelAlign.snap(px + 12f, scale), titleY,
                 UiKit.withAlpha(UiKit.TEXT, alpha));
+        UiFont.draw(categorySubtitle(category),
+                UiKit.PixelAlign.snap(px + 12f, scale),
+                UiKit.PixelAlign.snap(py + 24f, scale),
+                7.5f, UiKit.withAlpha(UiKit.MUTED, alpha));
+
         String count = String.valueOf(visibleRowCount(search));
+        float badgeW = Math.max(18f, UiFont.width(count, 8f) + 10f);
+        float badgeH = 14f;
+        float badgeX = px + pw - 12f - badgeW;
+        float badgeY = py + (HEADER_H - badgeH) * 0.5f;
+        UiKit.drawRoundedPanel(badgeX, badgeY, badgeW, badgeH, 6f,
+                UiKit.withAlpha(0x14FFFFFF, alpha));
         float cw = UiFont.width(count, 8f);
-        UiFont.draw(count, UiKit.PixelAlign.snap(px + pw - 12f - cw, scale),
-                UiKit.PixelAlign.snap(py + (HEADER_H - UiFont.height(8f)) * 0.5f, scale),
-                8f, UiKit.withAlpha(UiKit.MUTED, alpha));
+        UiFont.draw(count, UiKit.PixelAlign.snap(badgeX + (badgeW - cw) * 0.5f, scale),
+                UiKit.PixelAlign.snap(badgeY + (badgeH - UiFont.height(8f)) * 0.5f, scale),
+                8f, UiKit.withAlpha(0xFFB8BDC9, alpha));
 
         if (openAmt < 0.02f) {
             return;
@@ -330,6 +347,33 @@ public final class CategoryColumn {
             }
         } finally {
             scissors.pop();
+        }
+    }
+
+    private static String prettyCategory(Category category) {
+        String raw = category.name();
+        if (raw.isEmpty()) {
+            return raw;
+        }
+        return raw.charAt(0) + raw.substring(1).toLowerCase(Locale.ROOT);
+    }
+
+    private static String categorySubtitle(Category category) {
+        switch (category) {
+            case COMBAT:
+                return "Fighting tools";
+            case PLAYER:
+                return "Movement & place";
+            case VISUALS:
+                return "HUD & world";
+            case MISC:
+                return "Utility";
+            case SETTINGS:
+                return "Client options";
+            case SCRIPTS:
+                return "Loaded scripts";
+            default:
+                return "";
         }
     }
 

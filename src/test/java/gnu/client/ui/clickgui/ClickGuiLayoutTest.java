@@ -19,7 +19,7 @@ public class ClickGuiLayoutTest {
         for (Category category : Category.values()) {
             ClickGuiLayout.Column column = layout.get(category);
             assertNotNull(column);
-            assertEquals(8 + category.ordinal() * 140, column.getX());
+            assertEquals(8 + category.ordinal() * 168, column.getX());
             assertEquals(8, column.getY());
             assertTrue(column.isOpen());
         }
@@ -68,7 +68,7 @@ public class ClickGuiLayoutTest {
         assertEquals(8, layout.get(Category.COMBAT).getX());
         assertEquals(37, layout.get(Category.COMBAT).getY());
         assertTrue(layout.get(Category.COMBAT).isOpen());
-        assertEquals(148, layout.get(Category.PLAYER).getX());
+        assertEquals(176, layout.get(Category.PLAYER).getX());
         assertNotNull(layout.get(Category.SCRIPTS));
     }
 

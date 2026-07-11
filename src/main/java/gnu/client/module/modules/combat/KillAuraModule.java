@@ -662,7 +662,7 @@ public final class KillAuraModule extends Module {
     }
 
     private void clearRotationStateIfOwned() {
-        // KA MoveFix = 1; KA render-only = -1. Do not clear Scaffold (-3 / 3).
+        // KA MoveFix = 1; KA render-only = -1. Do not clear Scaffold MoveFix (3).
         int p = (int) RotationState.getPriority();
         if (p == ROTATION_PRIORITY || p == -1)
             RotationState.reset();

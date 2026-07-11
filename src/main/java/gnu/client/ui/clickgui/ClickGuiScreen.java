@@ -28,9 +28,9 @@ import java.util.Map;
  */
 public class ClickGuiScreen extends GuiScreen {
 
-    private static final float TOP_BAR_H = 30f;
-    private static final float TOP_BAR_Y = 8f;
-    private static final float SEARCH_W = 180f;
+    private static final float TOP_BAR_H = 36f;
+    private static final float TOP_BAR_Y = 10f;
+    private static final float SEARCH_W = 240f;
 
     private final List<CategoryColumn> columns = new ArrayList<CategoryColumn>();
     private final UiKit.UiClock clock = new UiKit.UiClock();
@@ -180,25 +180,29 @@ public class ClickGuiScreen extends GuiScreen {
         float bw = UiKit.PixelAlign.snap(barW, scale);
         float bh = UiKit.PixelAlign.snap(TOP_BAR_H, scale);
 
-        UiKit.drawRoundedPanel(bx, by, bw, bh, 10f, UiKit.withAlpha(UiKit.SURFACE_STRONG, alpha));
+        UiKit.drawRoundedPanel(bx, by, bw, bh, 14f, UiKit.withAlpha(UiKit.SURFACE_STRONG, alpha));
 
-        UiFont.draw("GNUClient", UiKit.PixelAlign.snap(bx + 12f, scale),
-                UiKit.PixelAlign.snap(by + (TOP_BAR_H - UiFont.height()) * 0.5f, scale),
+        UiFont.draw("GNUClient", UiKit.PixelAlign.snap(bx + 14f, scale),
+                UiKit.PixelAlign.snap(by + 8f, scale),
                 UiKit.withAlpha(UiKit.TEXT, alpha));
+        UiFont.draw("LUX INTERFACE",
+                UiKit.PixelAlign.snap(bx + 14f, scale),
+                UiKit.PixelAlign.snap(by + 20f, scale),
+                7f, UiKit.withAlpha(UiKit.MUTED, alpha));
 
-        float searchW = Math.min(SEARCH_W, barW * 0.45f);
+        float searchW = Math.min(SEARCH_W, barW * 0.48f);
         float searchX = bx + (bw - searchW) * 0.5f;
-        float searchY = by + 5f;
-        float searchH = 20f;
-        UiKit.drawRoundedPanel(searchX, searchY, searchW, searchH, 6f,
-                UiKit.withAlpha(searchFocused ? 0x148B5CF6 : 0x09FFFFFF, alpha));
+        float searchY = by + 7f;
+        float searchH = 22f;
+        UiKit.drawRoundedPanel(searchX, searchY, searchW, searchH, 11f,
+                UiKit.withAlpha(searchFocused ? 0x228B5CF6 : 0x12FFFFFF, alpha));
 
         String shown = search.isEmpty() && !searchFocused ? "Search modules..." : search;
         int color = search.isEmpty() && !searchFocused
                 ? UiKit.withAlpha(0xFF676E7D, alpha)
                 : UiKit.withAlpha(UiKit.TEXT, alpha);
         UiFont.draw(shown,
-                UiKit.PixelAlign.snap(searchX + 8f, scale),
+                UiKit.PixelAlign.snap(searchX + 10f, scale),
                 UiKit.PixelAlign.snap(searchY + (searchH - UiFont.height()) * 0.5f, scale),
                 color);
     }
@@ -207,11 +211,11 @@ public class ClickGuiScreen extends GuiScreen {
         int screenW = width;
         float barW = Math.min(480f, screenW - 24f);
         float barX = (screenW - barW) * 0.5f;
-        float searchW = Math.min(SEARCH_W, barW * 0.45f);
+        float searchW = Math.min(SEARCH_W, barW * 0.48f);
         float searchX = barX + (barW - searchW) * 0.5f;
-        float searchY = TOP_BAR_Y + 5f;
+        float searchY = TOP_BAR_Y + 7f;
         return mouseX >= searchX && mouseX <= searchX + searchW
-                && mouseY >= searchY && mouseY <= searchY + 20f;
+                && mouseY >= searchY && mouseY <= searchY + 22f;
     }
 
     private List<CategoryColumn> sortedByZ() {
