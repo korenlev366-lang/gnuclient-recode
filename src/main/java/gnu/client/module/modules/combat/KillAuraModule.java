@@ -596,8 +596,8 @@ public final class KillAuraModule extends Module {
     }
 
     /**
-     * OpenMyau {@code canAttack()} analogue for autoblock Context — no CPS delay gate
-     * (delay lives in {@code attackDelayMs} / {@link #canAttackThisTick}).
+     * OpenMyau soft {@code canAttack()} for autoblock Context only.
+     * Range / look-hit / HitSelect / RELEASE-order stay in {@link #canAttackThisTick}.
      */
     private boolean isAttackEligible(EntityPlayerSP player) {
         if (player == null || attackTarget == null || !canRunCombat())
@@ -610,20 +610,7 @@ public final class KillAuraModule extends Module {
             return false;
         if (isEatingOrUsingBow(player))
             return false;
-        if (AuraCombatPacketGuard.shouldSkipAttackForReleaseOrder())
-            return false;
-
-        double distSq = RavenRotationUtils.distanceSqFromEyeToClosestOnAabb(attackTarget);
-        double range = attackRange.getValue();
-        if (distSq > range * range)
-            return false;
-
-        if (rotations.getValue() != ROT_NONE && !lookHitsAttackTarget(player, range))
-            return false;
-
-        if (HitSelectModule.shouldBlockClick())
-            return false;
-        return Mc.controller() != null;
+        return true;
     }
 
     private boolean canAttackThisTick(EntityPlayerSP player) {
