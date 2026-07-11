@@ -6,6 +6,7 @@ import gnu.client.module.ModuleManager;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
+import gnu.client.module.modules.combat.killaura.KillAuraAutoBlock;
 import gnu.client.module.modules.network.LagrangeModule;
 import gnu.client.runtime.MoveFixUtil;
 import gnu.client.runtime.AuraCombatPacketGuard;
@@ -49,10 +50,8 @@ import java.util.concurrent.ThreadLocalRandom;
  *   <li><b>LockView</b> — instantly snaps the real camera to the raw target
  *       rotation every tick (no smoothing).</li>
  * </ul>
- * OpenMyau's LiquidBounce rotation mode and Blink-dependent auto-block modes
- * (VANILLA/SPOOF/HYPIXEL/BLINK/INTERACT/SWAP/LEGIT/FAKE) are intentionally
- * not ported — see class-level constraints in the porting task. Auto-block
- * here is a thin defer-to-{@link AutoBlockModule} toggle only.
+ * OpenMyau's LiquidBounce rotation mode is intentionally not ported.
+ * Auto-block modes are handled by {@link KillAuraAutoBlock} (default NONE).
  */
 public final class KillAuraModule extends Module {
 
@@ -81,10 +80,6 @@ public final class KillAuraModule extends Module {
     private static final int CPS_NORMAL = 0;
     private static final int CPS_RECORD = 1;
 
-    // ── Auto-block modes ─────────────────────────────────────────────────
-    private static final int AUTOBLOCK_NONE = 0;
-    private static final int AUTOBLOCK_DEFER = 1;
-
     private static final int ROTATION_PRIORITY = MoveFixUtil.KILLAURA_MOVE_FIX_PRIORITY;
     private static final double MULTIPOINT_OFFSET = 50.0;
 
@@ -103,8 +98,6 @@ public final class KillAuraModule extends Module {
         Arrays.asList("NONE", "Silent", "Strict")));
     private final ModeSetting cpsMode = addSetting(new ModeSetting("CPS Mode", CPS_NORMAL,
         Arrays.asList("Normal", "Record")));
-    private final ModeSetting autoBlock = addSetting(new ModeSetting("Auto-block", AUTOBLOCK_NONE,
-        Arrays.asList("NONE", "AUTO BLOCK")));
 
     private final SliderSetting minCps = addSetting(new SliderSetting("MinCPS", 10.0f, 1.0f, 20.0f));
     private final SliderSetting maxCps = addSetting(new SliderSetting("MaxCPS", 14.0f, 1.0f, 20.0f));
@@ -121,6 +114,14 @@ public final class KillAuraModule extends Module {
     private final BoolSetting requirePress = addSetting(new BoolSetting("RequirePress", false));
     private final BoolSetting weaponsOnly = addSetting(new BoolSetting("WeaponsOnly", true));
     private final BoolSetting inventoryCheck = addSetting(new BoolSetting("InventoryCheck", true));
+
+    private static final List<String> AUTO_BLOCK_MODES = Arrays.asList(
+        "NONE", "VANILLA", "SPOOF", "HYPIXEL", "BLINK", "INTERACT", "SWAP", "LEGIT", "FAKE");
+    private final ModeSetting autoBlock = addSetting(new ModeSetting("Auto-block", 0, AUTO_BLOCK_MODES));
+    private final SliderSetting autoBlockCps = addSetting(new SliderSetting("AutoBlockCPS", 8.0f, 1.0f, 10.0f));
+    private final SliderSetting autoBlockRange = addSetting(new SliderSetting("AutoBlockRange", 6.0f, 3.0f, 8.0f));
+    private final BoolSetting autoBlockRequirePress = addSetting(new BoolSetting("AutoBlockRequirePress", false));
+    private final KillAuraAutoBlock autoBlockHelper = new KillAuraAutoBlock();
 
     // ── State ─────────────────────────────────────────────────────────────
 
@@ -157,6 +158,7 @@ public final class KillAuraModule extends Module {
         clearRotationStateIfOwned();
         attackTarget = null;
         resetRotationState();
+        autoBlockHelper.reset();
         AuraCombatPacketGuard.unregister();
     }
 
@@ -166,11 +168,16 @@ public final class KillAuraModule extends Module {
     }
 
     @Override
+    public void onTickStart() {
+        AuraCombatPacketGuard.onClientTickStart();
+    }
+
+    @Override
     public String[] getSuffix() {
         return new String[] { mode.getCurrentMode() };
     }
 
-    // ── Static hook API (kept for PlayerUpdateHook / AimAssist / AutoBlock / MovementInputHook) ──
+    // ── Static hook API (kept for PlayerUpdateHook / AimAssist / MovementInputHook) ──
 
     public static boolean shouldYieldAimAssist() {
         Module module = ModuleManager.instance().getModule("KillAura");
@@ -225,6 +232,13 @@ public final class KillAuraModule extends Module {
             ((KillAuraModule) module).afterWalking(player);
     }
 
+    /** OpenMyau UpdateEvent POST — blinkReset release/reacquire for AUTO_BLOCK. */
+    public static void onPostUpdate() {
+        Module module = ModuleManager.instance().getModule("KillAura");
+        if (module instanceof KillAuraModule && module.isEnabled())
+            ((KillAuraModule) module).autoBlockHelper.onPostUpdate();
+    }
+
     /**
      * OpenMyau {@code KillAura.onMove}: {@code moveFix != 0 && Silent && isActived
      * && priority == 1 && isForwardPressed} → {@code MoveUtil.fixStrafe(smoothedYaw)}.
@@ -263,6 +277,7 @@ public final class KillAuraModule extends Module {
         if (!(player instanceof EntityPlayerSP) || !canRunCombat()) {
             attackTarget = null;
             clearRotationStateIfOwned();
+            autoBlockHelper.reset();
             return;
         }
         EntityPlayerSP sp = (EntityPlayerSP) player;
@@ -270,12 +285,48 @@ public final class KillAuraModule extends Module {
         updateTarget(sp);
         if (attackTarget == null) {
             clearRotationStateIfOwned();
+            autoBlockHelper.reset();
             return;
         }
 
         prepareRotation(sp);
-        if (canAttackThisTick(sp))
-            tryPerformAttack(sp);
+
+        float aimYaw;
+        float aimPitch;
+        if (rotations.getValue() == ROT_SILENT && pendingSentYaw != Float.MIN_VALUE) {
+            aimYaw = pendingSentYaw;
+            aimPitch = pendingSentPitch;
+        } else {
+            aimYaw = sp.rotationYaw;
+            aimPitch = sp.rotationPitch;
+        }
+
+        long now = System.currentTimeMillis();
+        long delayNeeded = autoBlockHelper.isBlockingSession()
+            ? autoBlockHelper.attackDelayMsWhenBlocking(autoBlockCps.getValue())
+            : getAttackDelayMs();
+        long remainingDelay = Math.max(0L, lastAttackMs + delayNeeded - now);
+
+        EntityLivingBase livingTarget = attackTarget instanceof EntityLivingBase
+            ? (EntityLivingBase) attackTarget : null;
+
+        KillAuraAutoBlock.Context ctx = new KillAuraAutoBlock.Context();
+        ctx.mode = autoBlock.getValue();
+        ctx.hasValidTarget = hasValidTargetInAutoBlockRange(sp);
+        ctx.attackEligible = isAttackEligible(sp);
+        ctx.canAutoBlock = canAutoBlock();
+        ctx.attackDelayMs = remainingDelay;
+        ctx.yaw = aimYaw;
+        ctx.pitch = aimPitch;
+        ctx.target = livingTarget;
+
+        KillAuraAutoBlock.TickResult tickResult = autoBlockHelper.tick(ctx);
+
+        boolean attacked = false;
+        if (tickResult.attackAllowed && !autoBlockHelper.shouldDeferAttack())
+            attacked = tryPerformAttack(sp);
+
+        autoBlockHelper.applyAfterAttack(tickResult, attacked, aimYaw, aimPitch, livingTarget);
     }
 
     private void afterWalking(Object player) {
@@ -337,6 +388,10 @@ public final class KillAuraModule extends Module {
     }
 
     private boolean isValidCandidate(Entity entity, EntityPlayerSP player) {
+        return isValidCandidate(entity, player, swingRange.getValue());
+    }
+
+    private boolean isValidCandidate(Entity entity, EntityPlayerSP player, double maxRange) {
         if (entity == null || entity == player)
             return false;
         if (!Mc.isEntityPlayer(entity))
@@ -351,7 +406,6 @@ public final class KillAuraModule extends Module {
         if (botCheck.getValue() && RavenAntiBot.isBot(entity))
             return false;
 
-        double maxRange = swingRange.getValue();
         double distSq = RavenRotationUtils.distanceSqFromEyeToClosestOnAabb(entity);
         if (distSq > maxRange * maxRange)
             return false;
@@ -364,6 +418,24 @@ public final class KillAuraModule extends Module {
                 return false;
         }
         return true;
+    }
+
+    private boolean hasValidTargetInAutoBlockRange(EntityPlayerSP player) {
+        WorldClient world = Mc.world();
+        if (world == null)
+            return false;
+        double range = autoBlockRange.getValue();
+        for (Entity entity : Mc.getWorldEntitiesFiltered(world)) {
+            if (isValidCandidate(entity, player, range))
+                return true;
+        }
+        return false;
+    }
+
+    private boolean canAutoBlock() {
+        if (!Mc.isHoldingSword())
+            return false;
+        return !autoBlockRequirePress.getValue() || Mc.isUseItemKeyDown();
     }
 
     private void sortCandidates(List<Entity> candidates) {
@@ -498,35 +570,60 @@ public final class KillAuraModule extends Module {
 
     // ── Attack ────────────────────────────────────────────────────────────
 
-    private boolean shouldSkipAttackForAutoBlockLag() {
-        if (autoBlock.getValue() != AUTOBLOCK_DEFER)
-            return false;
-        Module module = ModuleManager.INSTANCE.getModule("Auto Block");
-        if (!(module instanceof AutoBlockModule) || !module.isEnabled())
-            return false;
-        AutoBlockModule block = (AutoBlockModule) module;
-        return block.isLagging() && block.isHoldThroughLag();
-    }
-
-    /** Steady sword block — attack only in the lag blink, not while holding block. */
-    private boolean shouldSkipAttackForSteadyAutoBlock() {
-        if (autoBlock.getValue() != AUTOBLOCK_DEFER)
-            return false;
-        Module module = ModuleManager.INSTANCE.getModule("Auto Block");
-        if (!(module instanceof AutoBlockModule) || !module.isEnabled())
-            return false;
-        AutoBlockModule block = (AutoBlockModule) module;
-        return block.isActive() && !block.isLagging();
-    }
-
+    /**
+     * Manual eating/bow always skip. VANILLA allows attacks while sword-blocking
+     * (OpenMyau); other modes defer via {@link KillAuraAutoBlock#shouldDeferAttack()}.
+     */
     private boolean shouldSkipAttackForItemUse(EntityPlayerSP player) {
         if (player == null)
             return true;
+        if (isEatingOrUsingBow(player))
+            return true;
+        if (autoBlock.getValue() == KillAuraAutoBlock.VANILLA)
+            return false;
         if (Mc.isUsingItem(player) || Mc.isBlocking(player))
             return true;
         if (Mc.isUseItemKeyDown() && Mc.isHoldingSword())
             return true;
         return false;
+    }
+
+    /** Food/bow use — not sword block. */
+    private static boolean isEatingOrUsingBow(EntityPlayerSP player) {
+        if (player == null || !Mc.isUsingItem(player))
+            return false;
+        return !Mc.isHoldingSword();
+    }
+
+    /**
+     * OpenMyau {@code canAttack()} analogue for autoblock Context — no CPS delay gate
+     * (delay lives in {@code attackDelayMs} / {@link #canAttackThisTick}).
+     */
+    private boolean isAttackEligible(EntityPlayerSP player) {
+        if (player == null || attackTarget == null || !canRunCombat())
+            return false;
+        if (requirePress.getValue() && !Mc.isPhysicalLmbDown())
+            return false;
+        if (inventoryCheck.getValue() && Mc.currentScreen() != null)
+            return false;
+        if (weaponsOnly.getValue() && !Mc.isHoldingSword())
+            return false;
+        if (isEatingOrUsingBow(player))
+            return false;
+        if (AuraCombatPacketGuard.shouldSkipAttackForReleaseOrder())
+            return false;
+
+        double distSq = RavenRotationUtils.distanceSqFromEyeToClosestOnAabb(attackTarget);
+        double range = attackRange.getValue();
+        if (distSq > range * range)
+            return false;
+
+        if (rotations.getValue() != ROT_NONE && !lookHitsAttackTarget(player, range))
+            return false;
+
+        if (HitSelectModule.shouldBlockClick())
+            return false;
+        return Mc.controller() != null;
     }
 
     private boolean canAttackThisTick(EntityPlayerSP player) {
@@ -540,13 +637,15 @@ public final class KillAuraModule extends Module {
             return false;
         if (shouldSkipAttackForItemUse(player))
             return false;
-        if (shouldSkipAttackForSteadyAutoBlock())
-            return false;
-        if (shouldSkipAttackForAutoBlockLag())
+        // Grim PacketOrderI: C07 RELEASE then C02 same tick → type=attack, releasing=true.
+        if (AuraCombatPacketGuard.shouldSkipAttackForReleaseOrder())
             return false;
 
         long now = System.currentTimeMillis();
-        if (now - lastAttackMs < getAttackDelayMs())
+        long delayMs = autoBlockHelper.isBlockingSession()
+            ? autoBlockHelper.attackDelayMsWhenBlocking(autoBlockCps.getValue())
+            : getAttackDelayMs();
+        if (now - lastAttackMs < delayMs)
             return false;
 
         double distSq = RavenRotationUtils.distanceSqFromEyeToClosestOnAabb(attackTarget);
@@ -595,9 +694,10 @@ public final class KillAuraModule extends Module {
         return 1000L / cps;
     }
 
-    private void tryPerformAttack(EntityPlayerSP player) {
+    /** @return true if an attack packet was sent this call */
+    private boolean tryPerformAttack(EntityPlayerSP player) {
         if (!canAttackThisTick(player))
-            return;
+            return false;
 
         notifyPreAttackHooks(attackTarget);
 
@@ -611,7 +711,7 @@ public final class KillAuraModule extends Module {
             player.rotationPitch = pendingSentPitch;
         }
 
-        boolean swing = !shouldDeferSwingToAutoBlock();
+        boolean swing = true;
         boolean attacked = Mc.attackEntity(attackTarget, swing);
 
         if (useSilentAim) {
@@ -620,7 +720,7 @@ public final class KillAuraModule extends Module {
         }
 
         if (!attacked)
-            return;
+            return false;
 
         // OpenMyau: vanilla/PlayerUtil applies motion*=0.6 + setSprinting(false) when
         // sprinting. Do NOT clear the sprint key or suppress re-sprint — living must
@@ -632,6 +732,7 @@ public final class KillAuraModule extends Module {
 
         if (cpsMode.getValue() == CPS_RECORD)
             patternIndex = (patternIndex + 1) % CLICK_PATTERN.length;
+        return true;
     }
 
     private static void notifyPreAttackHooks(Entity target) {
@@ -639,13 +740,6 @@ public final class KillAuraModule extends Module {
         Module lagrange = ModuleManager.INSTANCE.getModule("Lagrange");
         if (lagrange instanceof LagrangeModule && lagrange.isEnabled())
             ((LagrangeModule) lagrange).noteForgeAttack(target);
-    }
-
-    private static boolean shouldDeferSwingToAutoBlock() {
-        Module autoBlockModule = ModuleManager.INSTANCE.getModule("Auto Block");
-        if (autoBlockModule instanceof AutoBlockModule && autoBlockModule.isEnabled())
-            return ((AutoBlockModule) autoBlockModule).killAuraShouldDeferSwing();
-        return false;
     }
 
     // ── Shared guards ─────────────────────────────────────────────────────

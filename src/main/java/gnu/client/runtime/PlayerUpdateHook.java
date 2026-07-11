@@ -147,6 +147,7 @@ public final class PlayerUpdateHook {
         // Do NOT reset RotationState here — OpenMyau keeps state through render
         // (isRotated(1) for F5/FreeLook). Modules clear when they lose the target.
         clearRotationOverride();
+        KillAuraModule.onPostUpdate();
     }
 
     private static boolean isLocal(Object player) {
