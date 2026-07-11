@@ -8,7 +8,6 @@ import gnu.client.lag.handler.UnifiedLagHandler;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.modules.combat.AimAssistModule;
 import gnu.client.module.modules.combat.AntiBotModule;
-import gnu.client.module.modules.combat.AutoBlockModule;
 import gnu.client.module.modules.combat.AutoClickerModule;
 import gnu.client.module.modules.combat.HitSelectModule;
 import gnu.client.module.modules.combat.KillAuraModule;
@@ -115,7 +114,6 @@ public class GnuClientMod {
         safeRegister(new AutoClickerModule());
         safeRegister(new HitSelectModule());
         safeRegister(new KillAuraModule());
-        safeRegister(new AutoBlockModule());
         safeRegister(new ReachModule());
         safeRegister(new EspModule());
         safeRegister(new TracersModule());

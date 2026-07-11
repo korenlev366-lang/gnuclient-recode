@@ -2,7 +2,6 @@ package gnu.client.runtime;
 
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
-import gnu.client.module.modules.combat.AutoBlockModule;
 import gnu.client.module.modules.combat.ReachModule;
 import gnu.client.module.modules.combat.WTapModule;
 import gnu.client.module.modules.network.BacktrackModule;
@@ -27,10 +26,6 @@ public final class CombatAttackNotify {
         Module wTap = ModuleManager.INSTANCE.getModule("W Tap");
         if (wTap instanceof WTapModule && wTap.isEnabled() && target instanceof Entity)
             ((WTapModule) wTap).noteForgeAttack((Entity) target);
-
-        Module autoBlock = ModuleManager.INSTANCE.getModule("Auto Block");
-        if (autoBlock instanceof AutoBlockModule && autoBlock.isEnabled() && target instanceof Entity)
-            ((AutoBlockModule) autoBlock).noteAttack((Entity) target);
     }
 
     public static void tickReachOnLmbEdge() {

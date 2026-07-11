@@ -31,7 +31,6 @@ public final class BindCommand {
         MODULE_ALIASES.put("menu", ClickGuiModule.NAME);
         MODULE_ALIASES.put("aimassist", "Aim Assist");
         MODULE_ALIASES.put("wtap", "W Tap");
-        MODULE_ALIASES.put("autoblock", "Auto Block");
         MODULE_ALIASES.put("bridgeassist", "Bridge Assist");
         MODULE_ALIASES.put("backtrack", "Back Track");
         MODULE_ALIASES.put("hitselect", "Hit Select");

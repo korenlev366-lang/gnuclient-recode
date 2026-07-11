@@ -633,6 +633,24 @@ public final class PacketHelper {
                 == C07PacketPlayerDigging.Action.RELEASE_USE_ITEM;
     }
 
+    /**
+     * C08 use-item only (1.8 sword block / eat): {@code placedBlockDirection == 255}.
+     * Real block interact/place uses direction 0–5.
+     */
+    public static boolean isUseItemOnlyC08(Object packet) {
+        if (!(packet instanceof C08PacketPlayerBlockPlacement))
+            return false;
+        return ((C08PacketPlayerBlockPlacement) packet).getPlacedBlockDirection() == 255;
+    }
+
+    /**
+     * C08 against a world face (interact/place), not the legacy use-item packet.
+     * Grim RotationPlace validates these against flying look.
+     */
+    public static boolean isBlockInteractOrPlace(Object packet) {
+        return isBlockPlacement(packet) && !isUseItemOnlyC08(packet);
+    }
+
     public static boolean isBlockPlacement(Object packet) {
         return packet instanceof C08PacketPlayerBlockPlacement
                 || classNameContains(packet, "C08PacketPlayerBlockPlacement");

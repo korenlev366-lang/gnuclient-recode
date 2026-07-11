@@ -5,7 +5,6 @@ import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.modules.combat.ReachModule;
 import gnu.client.module.modules.combat.WTapModule;
-import gnu.client.module.modules.combat.AutoBlockModule;
 import gnu.client.module.modules.network.BacktrackModule;
 import gnu.client.module.modules.network.LagrangeModule;
 import gnu.client.common.GnuLog;
@@ -79,14 +78,6 @@ public final class ClientEventListener {
     public void onMouse(MouseEvent event) {
         if (!Mc.isInGame())
             return;
-        if (event.button == 1) {
-            // Cancel right-click when AutoBlock is active and holding a sword
-            Module autoBlock = ModuleManager.INSTANCE.getModule("Auto Block");
-            if (autoBlock instanceof AutoBlockModule && autoBlock.isEnabled() && Mc.isHoldingSword()) {
-                event.setCanceled(true);
-                return;
-            }
-        }
         if (event.button != 0 || !event.buttonstate)
             return;
         ReachModule.applyIfEnabled();
@@ -126,9 +117,6 @@ public final class ClientEventListener {
         Module wTap = ModuleManager.INSTANCE.getModule("W Tap");
         if (wTap instanceof WTapModule && wTap.isEnabled())
             ((WTapModule) wTap).noteForgeAttack(event.target);
-        Module autoBlock = ModuleManager.INSTANCE.getModule("Auto Block");
-        if (autoBlock instanceof AutoBlockModule && autoBlock.isEnabled())
-            ((AutoBlockModule) autoBlock).noteAttack(event.target);
 
         Module lagrange = ModuleManager.INSTANCE.getModule("Lagrange");
         if (lagrange instanceof LagrangeModule && lagrange.isEnabled())
