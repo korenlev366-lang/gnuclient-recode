@@ -140,6 +140,32 @@ public final class KillAuraModule extends Module {
 
     public KillAuraModule() {
         super("KillAura", "Attacks players in range (OpenMyau-style)", Category.COMBAT);
+        updateSettingVisibility();
+    }
+
+    @Override
+    public void guiUpdate() {
+        updateSettingVisibility();
+    }
+
+    /** Hide settings that only apply to the currently selected modes. */
+    private void updateSettingVisibility() {
+        boolean autoBlockOn = autoBlock.getValue() != KillAuraAutoBlock.NONE;
+        autoBlockCps.setVisible(autoBlockOn);
+        autoBlockRange.setVisible(autoBlockOn);
+        autoBlockRequirePress.setVisible(autoBlockOn);
+
+        switchDelayMs.setVisible(mode.getValue() == MODE_SWITCH);
+
+        boolean cpsNormal = cpsMode.getValue() == CPS_NORMAL;
+        minCps.setVisible(cpsNormal);
+        maxCps.setVisible(cpsNormal);
+
+        boolean rotationsOn = rotations.getValue() != ROT_NONE;
+        horizontalSpeed.setVisible(rotationsOn);
+        verticalSpeed.setVisible(rotationsOn);
+        multipoint.setVisible(rotationsOn);
+        moveFix.setVisible(rotations.getValue() == ROT_SILENT);
     }
 
     @Override

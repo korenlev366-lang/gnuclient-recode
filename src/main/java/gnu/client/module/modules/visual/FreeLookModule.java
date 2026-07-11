@@ -106,6 +106,15 @@ public final class FreeLookModule extends Module implements PacketListener {
         super("FreeLook", "Look around in third-person without changing player rotation",
                 Category.VISUALS);
         setKeyCode(DEFAULT_KEY);
+        updateSettingVisibility();
+    }
+
+    @Override
+    public void guiUpdate() {
+        updateSettingVisibility();
+    }
+
+    private void updateSettingVisibility() {
         fov.setVisible(customFov.getValue());
     }
 

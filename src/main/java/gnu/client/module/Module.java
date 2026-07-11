@@ -65,6 +65,12 @@ public abstract class Module {
         return Collections.unmodifiableList(settings);
     }
 
+    /**
+     * Called by ClickGUI when this module's settings are measured, rendered, or clicked.
+     * Override to refresh mode-tied {@link Setting#setVisible(boolean)} (works even when disabled).
+     */
+    public void guiUpdate() {}
+
     public void setEnabled(boolean enabled) {
         if (this.enabled == enabled)
             return;

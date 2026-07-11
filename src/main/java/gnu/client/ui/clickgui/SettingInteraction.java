@@ -45,6 +45,7 @@ public final class SettingInteraction {
         if (module == null) {
             return 0f;
         }
+        module.guiUpdate();
         float h = 0f;
         // Width unknown at measure time — use column body estimate.
         float estimateW = UiKit.COLUMN_WIDTH - 24f;
@@ -60,6 +61,7 @@ public final class SettingInteraction {
         if (module == null) {
             return;
         }
+        module.guiUpdate();
         float rowY = y;
         for (Setting<?> setting : module.getSettings()) {
             if (!setting.isVisible()) {
@@ -77,6 +79,7 @@ public final class SettingInteraction {
         if (module == null) {
             return false;
         }
+        module.guiUpdate();
         float rowY = y;
         for (Setting<?> setting : module.getSettings()) {
             if (!setting.isVisible()) {
@@ -117,6 +120,7 @@ public final class SettingInteraction {
             }
             BoolSetting bool = (BoolSetting) setting;
             bool.setValue(!bool.getValue());
+            module.guiUpdate();
             ConfigManager.INSTANCE.requestSave();
             return true;
         }
@@ -128,6 +132,7 @@ public final class SettingInteraction {
             int hit = hitModeChip(mode, x, y, width, mouseX, mouseY);
             if (hit >= 0) {
                 mode.setValue(hit);
+                module.guiUpdate();
                 ConfigManager.INSTANCE.requestSave();
             }
             return true;

@@ -55,6 +55,11 @@ public final class NoSlowModule extends Module {
         updateSettingVisibility();
     }
 
+    @Override
+    public void guiUpdate() {
+        updateSettingVisibility();
+    }
+
     public static NoSlowModule instance() {
         Module module = ModuleManager.instance().getModule("NoSlow");
         return module instanceof NoSlowModule ? (NoSlowModule) module : null;
@@ -133,7 +138,6 @@ public final class NoSlowModule extends Module {
 
     @Override
     public void onTick() {
-        updateSettingVisibility();
         if (!isEnabled()) {
             FloatManager.INSTANCE.setFloatState(false, FloatModules.NO_SLOW);
             return;
