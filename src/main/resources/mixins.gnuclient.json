@@ -6,6 +6,7 @@
   "mixins": [
     "network.MixinNetworkManager",
     "entity.MixinEntityPlayerSP",
+    "entity.MixinEntityPlayerSPNoSlow",
     "entity.MixinEntityLivingBase",
     "entity.MixinEntityLivingBaseAnimations",
     "client.MixinMinecraft",
