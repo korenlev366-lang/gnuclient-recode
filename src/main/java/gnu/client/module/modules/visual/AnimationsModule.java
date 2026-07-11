@@ -49,7 +49,8 @@ public final class AnimationsModule extends Module {
     }
 
     public int getModeIndex() {
-        return mode.getValue();
+        int idx = mode.getValue();
+        return Math.max(0, Math.min(MODES.size() - 1, idx));
     }
 
     public int getScalePct() {
