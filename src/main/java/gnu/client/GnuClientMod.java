@@ -79,6 +79,7 @@ public class GnuClientMod {
         // Coexistence: when user Blink module is also on, both may hold; prefer not combining with KA blink modes.
         // Lagrange pause is deferred to KA autoblock activate (Task 7/8), not required at register.
         gnu.client.runtime.packet.PacketEvents.register(gnu.client.runtime.BlinkManager.INSTANCE);
+        gnu.client.runtime.FloatManager.init();
 
         registerModules();
         ConfigManager.setLoading(false);
