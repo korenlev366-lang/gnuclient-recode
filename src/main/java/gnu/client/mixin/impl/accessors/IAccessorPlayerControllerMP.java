@@ -13,6 +13,9 @@ public interface IAccessorPlayerControllerMP {
     @Accessor("blockHitDelay")
     void setBlockHitDelay(int delay);
 
+    @Accessor("isHittingBlock")
+    boolean getIsHittingBlock();
+
     @Accessor("currentPlayerItem")
     int getCurrentPlayerItem();
 
