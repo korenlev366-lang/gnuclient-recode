@@ -20,15 +20,42 @@ public final class ModeSetting extends Setting<Integer> {
     }
 
     public String getCurrentMode() {
-        int idx = getValue();
+        int idx = getIndex();
         if (idx < 0 || idx >= modes.size())
             return modes.isEmpty() ? "" : modes.get(0);
         return modes.get(idx);
     }
 
+    /** Safe mode index for {@code visibleWhen} predicates (never null). */
+    public int getIndex() {
+        Integer v = getValue();
+        if (v == null)
+            return 0;
+        int idx = v;
+        if (idx < 0)
+            return 0;
+        if (idx >= modes.size())
+            return Math.max(0, modes.size() - 1);
+        return idx;
+    }
+
+    @Override
+    public void setValue(Integer value) {
+        if (value == null) {
+            super.setValue(0);
+            return;
+        }
+        int idx = value;
+        if (idx < 0)
+            idx = 0;
+        else if (idx >= modes.size())
+            idx = Math.max(0, modes.size() - 1);
+        super.setValue(idx);
+    }
+
     @Override
     public JsonElement serialize() {
-        return new JsonPrimitive(getValue());
+        return new JsonPrimitive(getIndex());
     }
 
     @Override

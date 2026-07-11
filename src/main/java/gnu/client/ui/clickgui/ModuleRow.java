@@ -138,7 +138,8 @@ public final class ModuleRow {
         if (!contains(mouseX, mouseY, x, y + headerH, width, settingsBand)) {
             return false;
         }
-        if (expandAmt < 0.85f) {
+        // Allow clicks once the panel is mostly open (was 0.85 — too strict for mode chips).
+        if (expandAmt < 0.5f) {
             return false;
         }
         return settings.mouseClicked(module, x + PAD, settingsY, width - PAD * 2f,
@@ -219,9 +220,10 @@ public final class ModuleRow {
 
         float expandAmt = expand.get();
         if (expandAmt > 0.01f) {
-            float settingsY = hy + rowH + SETTINGS_PAD * 0.5f;
+            // Unsnapped geometry — must match mouseClicked so mode chips hit what they draw.
+            float settingsY = y + rowH + SETTINGS_PAD * 0.5f;
             float settingsAlpha = alpha * UiKit.clamp01(expandAmt);
-            settings.render(module, hx + PAD, settingsY, hw - PAD * 2f, settingsAlpha, scale);
+            settings.render(module, x + PAD, settingsY, width - PAD * 2f, settingsAlpha, scale);
         }
     }
 

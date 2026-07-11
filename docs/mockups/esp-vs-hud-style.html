@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GNUClient — ESP vs HUD / ClickGUI style</title>
+  <style>
+    :root {
+      --bg: #07080c;
+      --surface: rgba(15, 18, 27, 0.85);
+      --surface-strong: rgba(20, 24, 35, 0.96);
+      --text: #f5f6fa;
+      --muted: #969cab;
+      --accent: #8b5cf6;
+      --accent-2: #5f8cff;
+      --success: #57d7a0;
+      --danger: #ff7187;
+      --line: rgba(255, 255, 255, 0.075);
+      --esp-legacy: #00ff00;
+      --esp-legacy-fill: rgba(0, 255, 0, 0.18);
+      --esp-lux: #8b5cf6;
+      --esp-lux-fill: rgba(139, 92, 246, 0.16);
+      --esp-item: #5f8cff;
+      --esp-bed: #ff7187;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: radial-gradient(1200px 600px at 20% 0%, #14182a 0%, var(--bg) 55%);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 28px 24px 48px;
+    }
+
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 650;
+      letter-spacing: -0.02em;
+      margin: 0 0 6px;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 0.92rem;
+      margin: 0 0 22px;
+      max-width: 62ch;
+      line-height: 1.45;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+    }
+    .tab {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.03);
+      color: var(--muted);
+      padding: 8px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .tab.active {
+      color: var(--text);
+      background: rgba(139, 92, 246, 0.18);
+      border-color: rgba(139, 92, 246, 0.35);
+    }
+
+    .panel {
+      display: none;
+      gap: 18px;
+    }
+    .panel.active { display: grid; }
+    .panel.compare {
+      grid-template-columns: 1fr 1fr;
+    }
+    @media (max-width: 980px) {
+      .panel.compare { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+      min-height: 420px;
+      display: flex;
+      flex-direction: column;
+    }
+    .card-head {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+    .card-head strong { font-size: 0.9rem; }
+    .badge {
+      font-size: 0.72rem;
+      padding: 3px 8px;
+      border-radius: 999px;
+      color: var(--muted);
+      background: rgba(255,255,255,0.05);
+    }
+    .badge.warn { color: #ffb4be; background: rgba(255,113,135,0.12); }
+    .badge.ok { color: #9aefc8; background: rgba(87,215,160,0.12); }
+
+    .scene {
+      position: relative;
+      flex: 1;
+      background:
+        linear-gradient(180deg, rgba(8,10,16,0.2), rgba(8,10,16,0.75)),
+        repeating-linear-gradient(90deg, transparent, transparent 31px, rgba(255,255,255,0.03) 32px),
+        repeating-linear-gradient(0deg, transparent, transparent 31px, rgba(255,255,255,0.03) 32px),
+        #10131c;
+      min-height: 360px;
+      overflow: hidden;
+    }
+
+    /* faux world ground */
+    .horizon {
+      position: absolute;
+      left: 0; right: 0; bottom: 18%;
+      height: 1px;
+      background: rgba(255,255,255,0.08);
+    }
+    .ground {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      height: 18%;
+      background: linear-gradient(180deg, #12161f, #0a0c11);
+    }
+
+    /* HUD chrome shared */
+    .arraylist {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      align-items: flex-end;
+      z-index: 5;
+    }
+    .array-pill {
+      display: flex;
+      align-items: center;
+      height: 22px;
+      padding: 0 10px 0 8px;
+      border-radius: 7px;
+      background: rgba(12, 15, 22, 0.88);
+      font-size: 11px;
+      gap: 6px;
+      box-shadow: inset 2px 0 0 var(--accent);
+    }
+    .array-pill .suf { color: #8f82c9; font-size: 10px; }
+
+    .toast {
+      position: absolute;
+      left: 14px;
+      bottom: 14px;
+      width: 240px;
+      height: 52px;
+      border-radius: 12px;
+      background: var(--surface-strong);
+      border: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 12px;
+      z-index: 5;
+    }
+    .toast-icon {
+      width: 28px; height: 28px;
+      border-radius: 7px;
+      background: rgba(87,215,160,0.14);
+      color: var(--success);
+      display: grid;
+      place-items: center;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .toast-copy { display: flex; flex-direction: column; gap: 2px; }
+    .toast-copy b { font-size: 12px; font-weight: 600; }
+    .toast-copy span { font-size: 10px; color: var(--muted); }
+
+    .clickgui {
+      position: absolute;
+      left: 14px;
+      top: 14px;
+      width: 156px;
+      border-radius: 13px;
+      background: rgba(15, 18, 27, 0.92);
+      border: 1px solid var(--line);
+      padding: 8px;
+      z-index: 5;
+    }
+    .clickgui .cat {
+      font-size: 10px;
+      color: var(--muted);
+      margin: 2px 4px 8px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .row {
+      height: 34px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 8px;
+      background: rgba(255,255,255,0.03);
+      margin-bottom: 4px;
+    }
+    .row.on { box-shadow: inset 2px 0 0 var(--accent); }
+    .row span { font-size: 12px; }
+    .switch {
+      width: 27px; height: 15px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.12);
+      position: relative;
+    }
+    .switch::after {
+      content: "";
+      position: absolute;
+      width: 11px; height: 11px;
+      border-radius: 50%;
+      background: #fff;
+      top: 2px; left: 2px;
+    }
+    .switch.on { background: rgba(139,92,246,0.55); }
+    .switch.on::after { left: 14px; }
+
+    /* player / box stand-ins */
+    .actor {
+      position: absolute;
+      width: 42px;
+      height: 78px;
+      left: 52%;
+      bottom: 22%;
+      transform: translateX(-50%);
+    }
+    .actor.small {
+      width: 28px;
+      height: 28px;
+      left: 68%;
+      bottom: 24%;
+    }
+    .actor.bed {
+      width: 70px;
+      height: 28px;
+      left: 34%;
+      bottom: 22%;
+    }
+    .body {
+      width: 100%;
+      height: 100%;
+      border-radius: 4px;
+      background: linear-gradient(180deg, #3a4258, #232836);
+      opacity: 0.55;
+    }
+
+    .box {
+      position: absolute;
+      inset: -4px;
+      border: 1.5px solid var(--esp-legacy);
+      box-shadow: none;
+      pointer-events: none;
+    }
+    .box.filled { background: var(--esp-legacy-fill); }
+    /* Proposed: soft fill only — no outline */
+    .box.lux {
+      border: none;
+      box-shadow: none;
+      background: var(--esp-lux-fill);
+    }
+    .box.lux.filled { background: var(--esp-lux-fill); }
+    .box.item {
+      border: none;
+      box-shadow: none;
+      background: rgba(95,140,255,0.16);
+    }
+    .box.item.filled { background: rgba(95,140,255,0.16); }
+    .box.bed {
+      border: none;
+      box-shadow: none;
+      background: rgba(255,113,135,0.16);
+    }
+    .box.bed.filled { background: rgba(255,113,135,0.16); }
+
+    .label-3d {
+      position: absolute;
+      left: 50%;
+      top: -18px;
+      transform: translateX(-50%);
+      font-size: 10px;
+      white-space: nowrap;
+      padding: 2px 7px;
+      border-radius: 6px;
+      background: rgba(12,15,22,0.9);
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+    .label-3d.legacy {
+      background: #000;
+      color: #0f0;
+      border: none;
+      border-radius: 0;
+      font-family: monospace;
+      font-size: 11px;
+      padding: 1px 4px;
+    }
+
+    .note {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.5;
+      max-width: 80ch;
+    }
+    .swatches {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .swatch {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .dot {
+      width: 14px; height: 14px;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+  </style>
+</head>
+<body>
+  <h1>ESP vs ClickGUI / Arraylist / Notifications</h1>
+  <p class="sub">
+    Side-by-side mockup of today’s neon wireframe ESP against the Lux UI kit
+    (violet accent, soft dark surfaces, rounded pills). Open this file in a browser.
+  </p>
+
+  <div class="tabs">
+    <button class="tab active" data-panel="compare">Current vs proposed</button>
+    <button class="tab" data-panel="family">Proposed ESP family</button>
+    <button class="tab" data-panel="tokens">Tokens</button>
+  </div>
+
+  <!-- COMPARE -->
+  <div class="panel compare active" id="compare">
+    <div class="card">
+      <div class="card-head">
+        <strong>Current — classic ESP</strong>
+        <span class="badge warn">mismatched</span>
+      </div>
+      <div class="scene">
+        <div class="clickgui">
+          <div class="cat">Visuals</div>
+          <div class="row on"><span>ESP</span><div class="switch on"></div></div>
+          <div class="row"><span>BedESP</span><div class="switch"></div></div>
+        </div>
+        <div class="arraylist">
+          <div class="array-pill">KillAura <span class="suf">Switch</span></div>
+          <div class="array-pill">ESP</div>
+          <div class="array-pill">Blink</div>
+        </div>
+        <div class="horizon"></div>
+        <div class="ground"></div>
+        <div class="actor">
+          <div class="body"></div>
+          <div class="box filled"></div>
+          <div class="label-3d legacy">Player</div>
+        </div>
+        <div class="toast">
+          <div class="toast-icon">✓</div>
+          <div class="toast-copy">
+            <b>ESP</b>
+            <span>enabled</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <strong>Proposed — Lux-aligned ESP</strong>
+        <span class="badge ok">matches HUD</span>
+      </div>
+      <div class="scene">
+        <div class="clickgui">
+          <div class="cat">Visuals</div>
+          <div class="row on"><span>ESP</span><div class="switch on"></div></div>
+          <div class="row"><span>BedESP</span><div class="switch"></div></div>
+        </div>
+        <div class="arraylist">
+          <div class="array-pill">KillAura <span class="suf">Switch</span></div>
+          <div class="array-pill">ESP</div>
+          <div class="array-pill">Blink</div>
+        </div>
+        <div class="horizon"></div>
+        <div class="ground"></div>
+        <div class="actor">
+          <div class="body"></div>
+          <div class="box lux filled"></div>
+          <div class="label-3d">Player</div>
+        </div>
+        <div class="toast">
+          <div class="toast-icon">✓</div>
+          <div class="toast-copy">
+            <b>ESP</b>
+            <span>enabled</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FAMILY -->
+  <div class="panel" id="family" style="grid-template-columns: 1fr;">
+    <div class="card">
+      <div class="card-head">
+        <strong>Proposed defaults — one family, role colors</strong>
+        <span class="badge ok">UiKit tokens</span>
+      </div>
+      <div class="scene" style="min-height: 440px;">
+        <div class="arraylist">
+          <div class="array-pill">ESP</div>
+          <div class="array-pill">ItemESP</div>
+          <div class="array-pill">BedESP</div>
+          <div class="array-pill">Blink <span class="suf">Server</span></div>
+        </div>
+        <div class="horizon"></div>
+        <div class="ground"></div>
+
+        <div class="actor" style="left: 42%;">
+          <div class="body"></div>
+          <div class="box lux filled"></div>
+          <div class="label-3d">ESP / Server ESP · ACCENT</div>
+        </div>
+        <div class="actor small">
+          <div class="body"></div>
+          <div class="box item filled"></div>
+          <div class="label-3d">ItemESP · ACCENT_2</div>
+        </div>
+        <div class="actor bed">
+          <div class="body" style="border-radius: 3px;"></div>
+          <div class="box bed filled"></div>
+          <div class="label-3d">BedESP · DANGER</div>
+        </div>
+
+        <div class="toast">
+          <div class="toast-icon">✓</div>
+          <div class="toast-copy">
+            <b>Blink</b>
+            <span>enabled · server box uses ACCENT</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="note">
+      Same soft fill (~16% alpha), 1.5px outline, optional dark label chip using HUD surfaces —
+      not Minecraft monospace green. RGB sliders can remain as overrides; defaults should land on these tokens.
+    </p>
+  </div>
+
+  <!-- TOKENS -->
+  <div class="panel" id="tokens" style="grid-template-columns: 1fr;">
+    <div class="card" style="min-height: auto; padding: 18px 20px 22px;">
+      <div class="card-head" style="border: 0; padding: 0 0 12px;">
+        <strong>Shared tokens (from UiKit)</strong>
+      </div>
+      <div class="swatches">
+        <div class="swatch"><span class="dot" style="background:#8b5cf6"></span> ACCENT #8B5CF6 — player / server ESP</div>
+        <div class="swatch"><span class="dot" style="background:#5f8cff"></span> ACCENT_2 #5F8CFF — items</div>
+        <div class="swatch"><span class="dot" style="background:#ff7187"></span> DANGER #FF7187 — beds / threat</div>
+        <div class="swatch"><span class="dot" style="background:#57d7a0"></span> SUCCESS #57D7A0 — toast enable</div>
+        <div class="swatch"><span class="dot" style="background:#0c0f16"></span> array / label surface</div>
+        <div class="swatch"><span class="dot" style="background:#00ff00"></span> legacy default green (retire)</div>
+      </div>
+      <p class="note" style="margin-top: 16px;">
+        ClickGUI, arraylist, and notifications already share these. ESP modules currently default to
+        raw RGB (often pure green) via <code>RenderHelper</code> wireframes — that’s the visual gap.
+      </p>
+    </div>
+  </div>
+
+  <script>
+    document.querySelectorAll(".tab").forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        document.querySelectorAll(".tab").forEach(function (t) { t.classList.remove("active"); });
+        document.querySelectorAll(".panel").forEach(function (p) { p.classList.remove("active"); });
+        tab.classList.add("active");
+        document.getElementById(tab.dataset.panel).classList.add("active");
+      });
+    });
+  </script>
+</body>
+</html>

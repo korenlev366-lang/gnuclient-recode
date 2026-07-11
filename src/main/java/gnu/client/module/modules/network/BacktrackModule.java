@@ -14,6 +14,7 @@ import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
 import gnu.client.runtime.packet.PacketUtil;
+import gnu.client.util.EspDraw;
 import gnu.client.util.RenderHelper;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.multiplayer.WorldClient;
@@ -27,8 +28,6 @@ import net.minecraft.network.play.client.C02PacketUseEntity;
 import net.minecraft.network.play.server.S06PacketUpdateHealth;
 import net.minecraft.network.play.server.S13PacketDestroyEntities;
 
-import org.lwjgl.opengl.GL11;
-
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Deque;
@@ -41,7 +40,6 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 public final class BacktrackModule extends Module implements PacketListener {
 
     private static final List<String> MODES = Arrays.asList("Normal", "Advanced");
-    private static final List<String> RENDER_MODES = Arrays.asList("Box", "Outline", "Both");
 
     private final ModeSetting mode = addSetting(new ModeSetting("Mode", 0, MODES));
     private final SliderSetting backtrackTime = addSetting(new SliderSetting("Backtrack time", 150.0f, 0.0f, 2000.0f));
@@ -59,18 +57,10 @@ public final class BacktrackModule extends Module implements PacketListener {
 
     private final BoolSetting enableVisuals = addSetting(new BoolSetting("Enable visuals", true));
     private final BoolSetting renderServerRecord = addSetting(new BoolSetting("RenderServerRecord", true));
-    private final ModeSetting renderMode = addSetting(new ModeSetting("Render mode", 0, RENDER_MODES));
     private final BoolSetting drawBox = addSetting(new BoolSetting("DrawBox", true));
-    private final BoolSetting drawOutline = addSetting(new BoolSetting("DrawOutline", true));
-    private final BoolSetting drawFill = addSetting(new BoolSetting("DrawFill", false));
     private final SliderSetting boxColorR = addSetting(new SliderSetting("BoxColorR", 0.0f, 0.0f, 255.0f));
     private final SliderSetting boxColorG = addSetting(new SliderSetting("BoxColorG", 255.0f, 0.0f, 255.0f));
     private final SliderSetting boxColorB = addSetting(new SliderSetting("BoxColorB", 0.0f, 0.0f, 255.0f));
-    private final SliderSetting outlineColorR = addSetting(new SliderSetting("OutlineColorR", 255.0f, 0.0f, 255.0f));
-    private final SliderSetting outlineColorG = addSetting(new SliderSetting("OutlineColorG", 255.0f, 0.0f, 255.0f));
-    private final SliderSetting outlineColorB = addSetting(new SliderSetting("OutlineColorB", 255.0f, 0.0f, 255.0f));
-    private final SliderSetting lineWidth = addSetting(new SliderSetting("Line width", 1.5f, 1.0f, 4.0f));
-    private final SliderSetting outlineWidth = addSetting(new SliderSetting("Outline width", 1.5f, 1.0f, 4.0f));
     private final BoolSetting enableTrail = addSetting(new BoolSetting("EnableTrail", true));
     private final SliderSetting trailDuration = addSetting(new SliderSetting("Trail duration", 500.0f, 100.0f, 2000.0f));
     private final SliderSetting maxTrailPoints = addSetting(new SliderSetting("MaxTrailPoints", 20.0f, 5.0f, 50.0f));
@@ -127,27 +117,24 @@ public final class BacktrackModule extends Module implements PacketListener {
         distanceMin.visibleWhen(() -> useDistanceCheck.getValue());
         distanceMax.visibleWhen(() -> useDistanceCheck.getValue());
         renderServerRecord.visibleWhen(() -> enableVisuals.getValue());
-        renderMode.visibleWhen(() -> enableVisuals.getValue());
         drawBox.visibleWhen(() -> enableVisuals.getValue());
-        drawOutline.visibleWhen(() -> enableVisuals.getValue());
-        drawFill.visibleWhen(() -> enableVisuals.getValue());
-        boxColorR.visibleWhen(() -> enableVisuals.getValue());
-        boxColorG.visibleWhen(() -> enableVisuals.getValue());
-        boxColorB.visibleWhen(() -> enableVisuals.getValue());
-        outlineColorR.visibleWhen(() -> enableVisuals.getValue());
-        outlineColorG.visibleWhen(() -> enableVisuals.getValue());
-        outlineColorB.visibleWhen(() -> enableVisuals.getValue());
-        lineWidth.visibleWhen(() -> enableVisuals.getValue());
-        outlineWidth.visibleWhen(() -> enableVisuals.getValue());
-        enableTrail.visibleWhen(() -> enableVisuals.getValue());
+        boxColorR.visibleWhen(() -> enableVisuals.getValue() && drawBox.getValue());
+        boxColorG.visibleWhen(() -> enableVisuals.getValue() && drawBox.getValue());
+        boxColorB.visibleWhen(() -> enableVisuals.getValue() && drawBox.getValue());
+        enableTrail.visibleWhen(() -> enableVisuals.getValue() && renderServerRecord.getValue());
         enablePulse.visibleWhen(() -> enableVisuals.getValue());
         enableGlow.visibleWhen(() -> enableVisuals.getValue());
         enableHurt.visibleWhen(() -> enableVisuals.getValue());
-        trailDuration.visibleWhen(() -> enableVisuals.getValue() && enableTrail.getValue());
-        maxTrailPoints.visibleWhen(() -> enableVisuals.getValue() && enableTrail.getValue());
-        trailColorR.visibleWhen(() -> enableVisuals.getValue() && enableTrail.getValue());
-        trailColorG.visibleWhen(() -> enableVisuals.getValue() && enableTrail.getValue());
-        trailColorB.visibleWhen(() -> enableVisuals.getValue() && enableTrail.getValue());
+        trailDuration.visibleWhen(() -> enableVisuals.getValue() && renderServerRecord.getValue()
+                && enableTrail.getValue());
+        maxTrailPoints.visibleWhen(() -> enableVisuals.getValue() && renderServerRecord.getValue()
+                && enableTrail.getValue());
+        trailColorR.visibleWhen(() -> enableVisuals.getValue() && renderServerRecord.getValue()
+                && enableTrail.getValue());
+        trailColorG.visibleWhen(() -> enableVisuals.getValue() && renderServerRecord.getValue()
+                && enableTrail.getValue());
+        trailColorB.visibleWhen(() -> enableVisuals.getValue() && renderServerRecord.getValue()
+                && enableTrail.getValue());
         pulseSpeed.visibleWhen(() -> enableVisuals.getValue() && enablePulse.getValue());
         pulseMinAlpha.visibleWhen(() -> enableVisuals.getValue() && enablePulse.getValue());
         pulseMaxAlpha.visibleWhen(() -> enableVisuals.getValue() && enablePulse.getValue());
@@ -353,46 +340,27 @@ public final class BacktrackModule extends Module implements PacketListener {
         float br = boxColorR.getValue() / 255.0f;
         float bg = boxColorG.getValue() / 255.0f;
         float bb = boxColorB.getValue() / 255.0f;
-        float or = outlineColorR.getValue() / 255.0f;
-        float og = outlineColorG.getValue() / 255.0f;
-        float ob = outlineColorB.getValue() / 255.0f;
         if (hurtFlash) {
             br = hurtColorR.getValue() / 255.0f;
             bg = hurtColorG.getValue() / 255.0f;
             bb = hurtColorB.getValue() / 255.0f;
-            or = br;
-            og = bg;
-            ob = bb;
         }
 
         RenderHelper.begin();
         if (renderServerRecord.getValue() && enableTrail.getValue())
             drawServerTrail(vp, alpha * 0.6f);
 
-        int drawMode = renderMode.getValue();
-        boolean drawBoxLayer = drawMode == 0 || drawMode == 2;
-        boolean drawOutlineLayer = drawMode == 1 || drawMode == 2;
-
         if (enableGlow.getValue()) {
             float gr = glowColorR.getValue() / 255.0f;
             float gg = glowColorG.getValue() / 255.0f;
             float gb = glowColorB.getValue() / 255.0f;
             drawGhostBox(sx - vp[0], sy - vp[1], sz - vp[2],
-                    gr, gg, gb, alpha * glowIntensity.getValue() * 0.35f,
-                    lineWidth.getValue() + 1.5f, true, false, true, false);
+                    gr, gg, gb, alpha * glowIntensity.getValue() * 0.35f);
         }
 
-        if (drawFill.getValue() && drawBoxLayer)
-            drawGhostBox(sx - vp[0], sy - vp[1], sz - vp[2], br, bg, bb, alpha * 0.25f,
-                    lineWidth.getValue(), false, true, false, false);
-
-        if (drawBox.getValue() && drawBoxLayer)
-            drawGhostBox(sx - vp[0], sy - vp[1], sz - vp[2], br, bg, bb, alpha,
-                    lineWidth.getValue(), true, false, false, false);
-
-        if (drawOutline.getValue() && drawOutlineLayer)
-            drawGhostBox(sx - vp[0], sy - vp[1], sz - vp[2], or, og, ob, alpha,
-                    outlineWidth.getValue(), false, false, true, false);
+        if (drawBox.getValue())
+            drawGhostBox(sx - vp[0], sy - vp[1], sz - vp[2],
+                    br, bg, bb, EspDraw.DEFAULT_FILL_ALPHA * alpha);
 
         RenderHelper.end();
     }
@@ -802,28 +770,17 @@ public final class BacktrackModule extends Module implements PacketListener {
     }
 
     private void drawGhostBox(double rx, double ry, double rz,
-            float r, float g, float b, float alpha, float lw,
-            boolean box, boolean fill, boolean outline, boolean unusedWireframe) {
+            float r, float g, float b, float alpha) {
         double half = 0.3;
         double height = 1.8;
         if (target != null) {
             half = target.width * 0.5f;
             height = target.height;
         }
-
-        float drawLw = lw;
-
-        if (fill)
-            RenderHelper.drawFilledBox(
-                    rx - half, ry, rz - half,
-                    rx + half, ry + height, rz + half,
-                    r, g, b, alpha);
-
-        if (box || outline)
-            RenderHelper.drawBoundingBox(
-                    rx - half, ry, rz - half,
-                    rx + half, ry + height, rz + half,
-                    r, g, b, alpha, drawLw);
+        EspDraw.fill(
+                rx - half, ry, rz - half,
+                rx + half, ry + height, rz + half,
+                r, g, b, alpha);
     }
 
     private static final class QueuedInbound {

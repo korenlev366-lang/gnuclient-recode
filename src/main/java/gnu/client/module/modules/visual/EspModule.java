@@ -6,6 +6,7 @@ import gnu.client.module.Module;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.mc.Mc;
+import gnu.client.util.EspDraw;
 import gnu.client.util.RenderHelper;
 import net.minecraft.entity.Entity;
 
@@ -31,8 +32,6 @@ public final class EspModule extends Module {
     private final SliderSetting g = addSetting(new SliderSetting("Green", 255.0f, 0.0f, 255.0f));
     private final SliderSetting b = addSetting(new SliderSetting("Blue", 0.0f, 0.0f, 255.0f));
     private final BoolSetting showSelf = addSetting(new BoolSetting("Show Self", false));
-    private final BoolSetting filled = addSetting(new BoolSetting("Filled", false));
-    private final SliderSetting lineWidth = addSetting(new SliderSetting("Line Width", 1.0f, 1.0f, 3.0f));
 
     private final List<EntityData> cache = new ArrayList<>();
     private boolean debugLogged;
@@ -99,33 +98,21 @@ public final class EspModule extends Module {
         float fr = r.getValue() / 255.0f;
         float fg = g.getValue() / 255.0f;
         float fb = b.getValue() / 255.0f;
-        float lw = lineWidth.getValue();
 
         RenderHelper.begin();
-
         for (EntityData data : cache) {
             double ix = Mc.lerp(data.lastX, data.posX, partialTicks);
             double iy = Mc.lerp(data.lastY, data.posY, partialTicks);
             double iz = Mc.lerp(data.lastZ, data.posZ, partialTicks);
-
             double rx = ix - rvpX;
             double ry = iy - rvpY;
             double rz = iz - rvpZ;
-
             double height = data.sneaking ? 1.5 : 1.8;
-
-            if (filled.getValue()) {
-                RenderHelper.drawFilledBox(
-                        rx - 0.3, ry, rz - 0.3,
-                        rx + 0.3, ry + height, rz + 0.3,
-                        fr, fg, fb, 0.25f);
-            }
-            RenderHelper.drawBoundingBox(
+            EspDraw.fill(
                     rx - 0.3, ry, rz - 0.3,
                     rx + 0.3, ry + height, rz + 0.3,
-                    fr, fg, fb, 1.0f, lw);
+                    fr, fg, fb);
         }
-
         RenderHelper.end();
     }
 }

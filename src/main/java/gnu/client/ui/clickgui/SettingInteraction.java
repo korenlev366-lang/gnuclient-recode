@@ -132,9 +132,16 @@ public final class SettingInteraction {
             int hit = hitModeChip(mode, x, y, width, mouseX, mouseY);
             if (hit >= 0) {
                 mode.setValue(hit);
-                module.guiUpdate();
-                ConfigManager.INSTANCE.requestSave();
+            } else {
+                // Click on label / empty padding — cycle modes (narrow columns miss chips easily).
+                List<String> modes = mode.getModes();
+                if (modes != null && !modes.isEmpty()) {
+                    int cur = mode.getIndex();
+                    mode.setValue((cur + 1) % modes.size());
+                }
             }
+            module.guiUpdate();
+            ConfigManager.INSTANCE.requestSave();
             return true;
         }
         if (setting instanceof SliderSetting) {
@@ -195,7 +202,7 @@ public final class SettingInteraction {
 
         ChipLayout layout = layoutChips(mode, x, y, width);
         List<String> modes = mode.getModes();
-        int selected = mode.getValue();
+        int selected = mode.getIndex();
         for (int i = 0; i < layout.count; i++) {
             float cx = layout.xs[i];
             float cy = layout.ys[i];

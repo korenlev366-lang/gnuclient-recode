@@ -3,6 +3,8 @@ package gnu.client.runtime;
 import gnu.client.config.ConfigManager;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
+import gnu.client.module.modules.combat.AntiBotModule;
+import gnu.client.module.modules.combat.RavenAntiBot;
 import gnu.client.module.modules.combat.ReachModule;
 import gnu.client.module.modules.combat.WTapModule;
 import gnu.client.module.modules.network.BacktrackModule;
@@ -102,8 +104,12 @@ public final class ClientEventListener {
     @SubscribeEvent
     public void onRenderName(RenderLivingEvent.Specials.Pre<?> event) {
         Module nametags = ModuleManager.INSTANCE.getModule("NameTags");
-        if (nametags != null && nametags.isEnabled())
-            event.setCanceled(true);
+        if (nametags == null || !nametags.isEnabled())
+            return;
+        // NameTags skips AntiBot-flagged bots — leave vanilla nametags for them.
+        if (AntiBotModule.isActive() && RavenAntiBot.isBot(event.entity))
+            return;
+        event.setCanceled(true);
     }
 
     @SubscribeEvent

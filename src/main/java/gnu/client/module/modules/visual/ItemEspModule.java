@@ -5,6 +5,7 @@ import gnu.client.module.Module;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.mc.Mc;
+import gnu.client.util.EspDraw;
 import gnu.client.util.RenderHelper;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.item.EntityItem;
@@ -137,14 +138,10 @@ public final class ItemEspModule extends Module {
             double ry = iy - rvpY;
             double rz = iz - rvpZ;
 
-            RenderHelper.drawFilledBox(
+            EspDraw.fill(
                     rx - 0.15, ry, rz - 0.15,
                     rx + 0.15, ry + 0.25, rz + 0.15,
-                    data.cr, data.cg, data.cb, 0.35f);
-            RenderHelper.drawBoundingBox(
-                    rx - 0.15, ry, rz - 0.15,
-                    rx + 0.15, ry + 0.25, rz + 0.15,
-                    data.cr, data.cg, data.cb, 1.0f, 1.5f);
+                    data.cr, data.cg, data.cb);
         }
 
         RenderHelper.end();

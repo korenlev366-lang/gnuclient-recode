@@ -11,6 +11,7 @@ import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
 import gnu.client.runtime.packet.PacketUtil;
+import gnu.client.util.EspDraw;
 import gnu.client.util.RenderHelper;
 
 /**
@@ -27,8 +28,6 @@ public final class BlinkModule extends Module implements PacketListener {
     private final SliderSetting espRed = addSetting(new SliderSetting("Red", 0.0f, 0.0f, 255.0f));
     private final SliderSetting espGreen = addSetting(new SliderSetting("Green", 255.0f, 0.0f, 255.0f));
     private final SliderSetting espBlue = addSetting(new SliderSetting("Blue", 0.0f, 0.0f, 255.0f));
-    private final BoolSetting espFilled = addSetting(new BoolSetting("Filled", false));
-    private final SliderSetting espLineWidth = addSetting(new SliderSetting("Line Width", 1.0f, 1.0f, 3.0f));
     private boolean frozenPosValid;
     private double frozenX;
     private double frozenY;
@@ -40,8 +39,6 @@ public final class BlinkModule extends Module implements PacketListener {
         espRed.visibleWhen(() -> serverEsp.getValue());
         espGreen.visibleWhen(() -> serverEsp.getValue());
         espBlue.visibleWhen(() -> serverEsp.getValue());
-        espFilled.visibleWhen(() -> serverEsp.getValue());
-        espLineWidth.visibleWhen(() -> serverEsp.getValue());
     }
 
     @Override
@@ -99,10 +96,9 @@ public final class BlinkModule extends Module implements PacketListener {
         float fr = espRed.getValue() / 255.0f;
         float fg = espGreen.getValue() / 255.0f;
         float fb = espBlue.getValue() / 255.0f;
-        float lw = espLineWidth.getValue();
 
         RenderHelper.begin();
-        drawGhostBox(frozenX - vp[0], frozenY - vp[1], frozenZ - vp[2], fr, fg, fb, lw);
+        drawGhostBox(frozenX - vp[0], frozenY - vp[1], frozenZ - vp[2], fr, fg, fb);
         RenderHelper.end();
     }
 
@@ -135,16 +131,10 @@ public final class BlinkModule extends Module implements PacketListener {
     }
 
     private void drawGhostBox(double rx, double ry, double rz,
-                              float r, float g, float b, float lineWidth) {
-        if (espFilled.getValue()) {
-            RenderHelper.drawFilledBox(
-                    rx - 0.3, ry, rz - 0.3,
-                    rx + 0.3, ry + 1.8, rz + 0.3,
-                    r, g, b, 0.25f);
-        }
-        RenderHelper.drawBoundingBox(
+                              float r, float g, float b) {
+        EspDraw.fill(
                 rx - 0.3, ry, rz - 0.3,
                 rx + 0.3, ry + 1.8, rz + 0.3,
-                r, g, b, 1.0f, lineWidth);
+                r, g, b);
     }
 }

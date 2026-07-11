@@ -2,9 +2,9 @@ package gnu.client.module.modules.visual;
 
 import gnu.client.module.Category;
 import gnu.client.module.Module;
-import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.mc.Mc;
+import gnu.client.util.EspDraw;
 import gnu.client.util.RenderHelper;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockBed;
@@ -27,7 +27,6 @@ public final class BedEspModule extends Module {
     private final SliderSetting r = addSetting(new SliderSetting("Red", 255.0f, 0.0f, 255.0f));
     private final SliderSetting g = addSetting(new SliderSetting("Green", 85.0f, 0.0f, 255.0f));
     private final SliderSetting b = addSetting(new SliderSetting("Blue", 85.0f, 0.0f, 255.0f));
-    private final BoolSetting filled = addSetting(new BoolSetting("Filled", false));
     private final SliderSetting maxDist = addSetting(new SliderSetting("Max Distance", 64.0f, 8.0f, 64.0f));
 
     private int ticksSinceScan = SCAN_INTERVAL;
@@ -117,7 +116,6 @@ public final class BedEspModule extends Module {
         float fr = r.getValue() / 255.0f;
         float fg = g.getValue() / 255.0f;
         float fb = b.getValue() / 255.0f;
-        double height = filled.getValue() ? 1.0 : 0.5625;
 
         RenderHelper.begin();
 
@@ -130,13 +128,10 @@ public final class BedEspModule extends Module {
             double minY = by - rvpY;
             double minZ = bz - rvpZ;
             double maxX = minX + 1.0;
-            double maxY = minY + height;
+            double maxY = minY + 0.5625;
             double maxZ = minZ + 1.0;
 
-            if (filled.getValue()) {
-                RenderHelper.drawFilledBox(minX, minY, minZ, maxX, maxY, maxZ, fr, fg, fb, 0.35f);
-            }
-            RenderHelper.drawBoundingBox(minX, minY, minZ, maxX, maxY, maxZ, fr, fg, fb, 1.0f, 2.0f);
+            EspDraw.fill(minX, minY, minZ, maxX, maxY, maxZ, fr, fg, fb);
         }
 
         RenderHelper.end();

@@ -15,6 +15,7 @@ import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
 import gnu.client.runtime.packet.PacketUtil;
+import gnu.client.util.EspDraw;
 import gnu.client.util.RenderHelper;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.multiplayer.WorldClient;
@@ -57,8 +58,6 @@ public final class LagrangeModule extends Module implements PacketListener {
     private final SliderSetting espRed = addSetting(new SliderSetting("Red", 255.0f, 0.0f, 255.0f));
     private final SliderSetting espGreen = addSetting(new SliderSetting("Green", 0.0f, 0.0f, 255.0f));
     private final SliderSetting espBlue = addSetting(new SliderSetting("Blue", 0.0f, 0.0f, 255.0f));
-    private final BoolSetting espFilled = addSetting(new BoolSetting("Filled", false));
-    private final SliderSetting espLineWidth = addSetting(new SliderSetting("Line Width", 2.0f, 1.0f, 5.0f));
 
     /** Raven {@code UnifiedLagHandler}'s BiTrack queue — shared across all lag modules. */
     private static final LagrangeOutboundTrack BIDI_TRACK = new LagrangeOutboundTrack();
@@ -95,8 +94,6 @@ public final class LagrangeModule extends Module implements PacketListener {
         espRed.visibleWhen(() -> realPositionIndicator.getValue());
         espGreen.visibleWhen(() -> realPositionIndicator.getValue());
         espBlue.visibleWhen(() -> realPositionIndicator.getValue());
-        espFilled.visibleWhen(() -> realPositionIndicator.getValue());
-        espLineWidth.visibleWhen(() -> realPositionIndicator.getValue());
     }
 
     // ── Raven UnifiedLagHandler singleton access ───────────────────────
@@ -389,10 +386,9 @@ public final class LagrangeModule extends Module implements PacketListener {
         float fr = espRed.getValue() / 255.0f;
         float fg = espGreen.getValue() / 255.0f;
         float fb = espBlue.getValue() / 255.0f;
-        float lw = espLineWidth.getValue();
 
         RenderHelper.begin();
-        drawGhostBox(drawX - vp[0], drawY - vp[1], drawZ - vp[2], fr, fg, fb, lw);
+        drawGhostBox(drawX - vp[0], drawY - vp[1], drawZ - vp[2], fr, fg, fb);
         RenderHelper.end();
     }
 
@@ -647,17 +643,11 @@ public final class LagrangeModule extends Module implements PacketListener {
     }
 
     private void drawGhostBox(double rx, double ry, double rz,
-                              float r, float g, float b, float lineWidth) {
-        if (espFilled.getValue()) {
-            RenderHelper.drawFilledBox(
-                    rx - 0.3, ry, rz - 0.3,
-                    rx + 0.3, ry + 1.8, rz + 0.3,
-                    r, g, b, 0.25f);
-        }
-        RenderHelper.drawBoundingBox(
+                              float r, float g, float b) {
+        EspDraw.fill(
                 rx - 0.3, ry, rz - 0.3,
                 rx + 0.3, ry + 1.8, rz + 0.3,
-                r, g, b, 1.0f, lineWidth);
+                r, g, b);
     }
 
 }
