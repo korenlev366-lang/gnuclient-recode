@@ -76,6 +76,9 @@ public class GnuClientMod {
         MinecraftForge.EVENT_BUS.register(RotationHelper.get());
         MinecraftForge.EVENT_BUS.register(lagHandler = new UnifiedLagHandler());
         MinecraftForge.EVENT_BUS.register(new PacketEventsBridge());
+        // Coexistence: when user Blink module is also on, both may hold; prefer not combining with KA blink modes.
+        // Lagrange pause is deferred to KA autoblock activate (Task 7/8), not required at register.
+        gnu.client.runtime.packet.PacketEvents.register(gnu.client.runtime.BlinkManager.INSTANCE);
 
         registerModules();
         ConfigManager.setLoading(false);
