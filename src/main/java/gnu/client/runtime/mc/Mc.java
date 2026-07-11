@@ -35,6 +35,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.ItemSword;
 import net.minecraft.network.Packet;
 import net.minecraft.network.play.client.C07PacketPlayerDigging;
+import net.minecraft.network.play.client.C08PacketPlayerBlockPlacement;
 import net.minecraft.network.play.client.C09PacketHeldItemChange;
 import net.minecraft.network.play.client.C0BPacketEntityAction;
 import net.minecraft.network.play.client.C0CPacketInput;
@@ -782,6 +783,25 @@ public final class Mc {
                 C07PacketPlayerDigging.Action.RELEASE_USE_ITEM,
                 BlockPos.ORIGIN,
                 EnumFacing.DOWN));
+    }
+
+    public static void sendUseItemBlockPlacement(ItemStack stack) {
+        if (stack == null)
+            return;
+        PacketUtil.sendPacket(new C08PacketPlayerBlockPlacement(stack));
+    }
+
+    public static void startSwordBlock(EntityPlayer player, ItemStack stack) {
+        if (player == null || stack == null)
+            return;
+        sendUseItemBlockPlacement(stack);
+        player.setItemInUse(stack, stack.getMaxItemUseDuration());
+    }
+
+    public static void stopSwordBlock(EntityPlayer player) {
+        sendReleaseUseItem(player);
+        if (player != null)
+            player.stopUsingItem();
     }
 
     public static void sendHeldItemChange(int slot) {
