@@ -33,6 +33,7 @@ import gnu.client.module.modules.settings.ClickGuiModule;
 import gnu.client.module.modules.visual.BedEspModule;
 import gnu.client.module.modules.visual.EspModule;
 import gnu.client.module.modules.visual.FreeLookModule;
+import gnu.client.module.modules.visual.AnimationsModule;
 import gnu.client.module.modules.visual.HudModule;
 import gnu.client.module.modules.visual.ItemEspModule;
 import gnu.client.module.modules.visual.NameTagsModule;
@@ -116,6 +117,7 @@ public class GnuClientMod {
         safeRegister(new BedEspModule());
         safeRegister(new NameTagsModule());
         safeRegister(new HudModule());
+        safeRegister(new AnimationsModule());
         safeRegister(new BlinkModule());
         safeRegister(new KnockbackDelayModule());
         safeRegister(new BacktrackModule());
