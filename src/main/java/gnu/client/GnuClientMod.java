@@ -27,6 +27,7 @@ import gnu.client.module.modules.network.PingFixModule;
 import gnu.client.module.modules.player.BridgeAssistModule;
 import gnu.client.module.modules.player.DelayRemoverModule;
 import gnu.client.module.modules.player.FastPlaceModule;
+import gnu.client.module.modules.player.NoSlowModule;
 import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.module.impl.client.Settings;
 import gnu.client.module.modules.settings.ClickGuiModule;
@@ -100,6 +101,7 @@ public class GnuClientMod {
         safeRegister(new ClickGuiModule());
         safeRegister(new WTapModule());
         safeRegister(new SprintModule());
+        safeRegister(new NoSlowModule());
         safeRegister(new BridgeAssistModule());
         safeRegister(new FastStopModule());
         safeRegister(new TimerModule());
