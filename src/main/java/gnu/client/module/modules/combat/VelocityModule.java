@@ -135,7 +135,7 @@ public final class VelocityModule extends Module implements PacketListener {
         legitSmartJumpLimit.visibleWhen(() -> modeIs("LegitSmart"));
         intaveReduceFactor.visibleWhen(() -> modeIs("IntaveReduce"));
         intaveReduceHurtTime.visibleWhen(() -> modeIs("IntaveReduce"));
-        chance.visibleWhen(() -> modeIsAny("Legit", "LegitTest", "LegitSmart"));
+        chance.visibleWhen(() -> modeIsAny("Legit", "LegitTest", "LegitSmart", "JumpReset"));
         horizontal.visibleWhen(() -> modeIsAny("Standard", "BufferAbuse", "Redesky", "Vulcan"));
         vertical.visibleWhen(() -> modeIsAny("Standard", "BufferAbuse", "Redesky", "Vulcan"));
         explosionHorizontal.visibleWhen(() -> modeIs("Standard"));
