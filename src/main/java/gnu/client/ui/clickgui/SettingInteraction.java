@@ -87,7 +87,7 @@ public final class SettingInteraction {
             }
             float h = settingHeight(setting, width);
             if (contains(mouseX, mouseY, x, rowY, width, h)) {
-                return clickSetting(setting, x, rowY, width, h, mouseX, mouseY, button);
+                return clickSetting(module, setting, x, rowY, width, h, mouseX, mouseY, button);
             }
             rowY += h;
         }
@@ -112,7 +112,7 @@ public final class SettingInteraction {
         dragging = null;
     }
 
-    private boolean clickSetting(Setting<?> setting, float x, float y, float width, float height,
+    private boolean clickSetting(Module module, Setting<?> setting, float x, float y, float width, float height,
             int mouseX, int mouseY, int button) {
         if (setting instanceof BoolSetting) {
             if (button != 0) {
