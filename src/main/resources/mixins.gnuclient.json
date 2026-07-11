@@ -21,6 +21,7 @@
     "accessors.IAccessorGameSettings",
     "accessors.IAccessorEntityLivingBase",
     "accessors.IAccessorGuiContainer",
+    "accessors.IAccessorItemRenderer",
     "accessors.IAccessorS12PacketEntityVelocity",
     "accessors.IAccessorS27PacketExplosion",
     "accessors.IAccessorC0CPacketInput",
