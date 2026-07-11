@@ -12,6 +12,7 @@
     "render.MixinEntityRenderer",
     "render.MixinGuiIngame",
     "render.MixinRenderManager",
+    "render.MixinItemRendererAnimations",
     "accessors.IAccessorMinecraft",
     "accessors.IAccessorTimer",
     "accessors.IAccessorEntityPlayerSP",
