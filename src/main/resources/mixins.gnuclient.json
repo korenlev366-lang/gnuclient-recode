@@ -22,6 +22,7 @@
     "accessors.IAccessorC03PacketPlayer",
     "accessors.IAccessorRenderManager",
     "accessors.IAccessorGameSettings",
+    "accessors.IAccessorEntity",
     "accessors.IAccessorEntityLivingBase",
     "accessors.IAccessorGuiContainer",
     "accessors.IAccessorItemRenderer",

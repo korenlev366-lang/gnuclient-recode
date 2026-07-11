@@ -36,6 +36,7 @@ import gnu.client.event.StrafeEvent;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
+import gnu.client.module.modules.network.KnockbackDelayModule;
 import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketListener;
@@ -268,6 +269,9 @@ public final class VelocityModule extends Module implements PacketListener {
     @Override
     public boolean onReceive(Object packet) {
         if (!isEnabled())
+            return false;
+        // KnockbackDelay owns inbound — do not cancel/modify self S12 out from under it.
+        if (KnockbackDelayModule.isOwningInboundQueue())
             return false;
         return getActiveMode().onReceive(packet);
     }

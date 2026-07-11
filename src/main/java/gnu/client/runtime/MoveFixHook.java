@@ -7,7 +7,8 @@ package gnu.client.runtime;
  * {@code getSmoothedYaw()} stays at camera yaw unless {@code setPervRotation}
  * ran. Our {@link RotationState#applyState} writes the <em>move</em> yaw
  * ({@code pervYaw}) into smoothYaw when MoveFix is armed, so we require KillAura
- * (1) / Scaffold (3) priority — otherwise Simulation fires from silent yaw + camera WASD.
+ * (1) / Displace (2) / Scaffold (3) priority — otherwise Simulation fires from
+ * silent yaw + camera WASD.
  */
 public final class MoveFixHook {
 
@@ -18,6 +19,7 @@ public final class MoveFixHook {
             return false;
         int priority = (int) RotationState.getPriority();
         return priority == MoveFixUtil.KILLAURA_MOVE_FIX_PRIORITY
+            || priority == MoveFixUtil.DISPLACE_MOVE_FIX_PRIORITY
             || priority == MoveFixUtil.SCAFFOLD_MOVE_FIX_PRIORITY;
     }
 }

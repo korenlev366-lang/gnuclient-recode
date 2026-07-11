@@ -11,6 +11,7 @@ import gnu.client.ui.UiFont;
 import gnu.client.ui.UiKit;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.ScaledResolution;
+import net.minecraft.client.renderer.GlStateManager;
 import org.lwjgl.input.Keyboard;
 import org.lwjgl.input.Mouse;
 
@@ -132,6 +133,19 @@ public class ClickGuiScreen extends GuiScreen {
         return gui != null ? gui.getPanelOpacity() : 0.84f;
     }
 
+    private float userScale() {
+        float s = ClickGuiModule.resolveScale();
+        return s <= 0f ? 1.0f : s;
+    }
+
+    private int logicalX(int mouseX) {
+        return Math.round(mouseX / userScale());
+    }
+
+    private int logicalY(int mouseY) {
+        return Math.round(mouseY / userScale());
+    }
+
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
         applyVisualSettings();
@@ -140,9 +154,11 @@ public class ClickGuiScreen extends GuiScreen {
         float alpha = panelAlpha();
         boolean blur = UiBlur.isEnabled();
 
+        int lx = logicalX(mouseX);
+        int ly = logicalY(mouseY);
         for (CategoryColumn column : columns) {
-            column.update(dt, mouseX, mouseY, search);
-            column.mouseDragged(mouseX, mouseY);
+            column.update(dt, lx, ly, search);
+            column.mouseDragged(lx, ly);
         }
 
         final ScaledResolution sr = new ScaledResolution(mc);
@@ -150,18 +166,22 @@ public class ClickGuiScreen extends GuiScreen {
         final float panelAlpha = alpha;
         final boolean wantBlur = blur;
         final String searchQuery = search;
+        final int logicalScreenW = Math.round(sr.getScaledWidth() / userScale());
         UiKit.GlGuard.run(new Runnable() {
             @Override
             public void run() {
                 UiBlur.beginFrame(wantBlur);
+                GlStateManager.pushMatrix();
                 try {
-                    drawTopBar(sr.getScaledWidth(), panelAlpha, scale);
+                    GlStateManager.scale(userScale(), userScale(), 1f);
+                    drawTopBar(logicalScreenW, panelAlpha, scale);
                     List<CategoryColumn> ordered = sortedByZ();
                     for (CategoryColumn column : ordered) {
-                        column.render(panelAlpha, scale, searchQuery,
+                        column.render(panelAlpha, scale, userScale(), searchQuery,
                                 wantBlur && UiBlur.isUsable(), scissors);
                     }
                 } finally {
+                    GlStateManager.popMatrix();
                     scissors.clear();
                     UiBlur.endFrame();
                 }
@@ -208,7 +228,7 @@ public class ClickGuiScreen extends GuiScreen {
     }
 
     private boolean searchHit(int mouseX, int mouseY) {
-        int screenW = width;
+        float screenW = width / userScale();
         float barW = Math.min(480f, screenW - 24f);
         float barX = (screenW - barW) * 0.5f;
         float searchW = Math.min(SEARCH_W, barW * 0.48f);
@@ -237,16 +257,18 @@ public class ClickGuiScreen extends GuiScreen {
 
     @Override
     protected void mouseClicked(int mouseX, int mouseY, int mouseButton) throws IOException {
-        if (searchHit(mouseX, mouseY)) {
+        int lx = logicalX(mouseX);
+        int ly = logicalY(mouseY);
+        if (searchHit(lx, ly)) {
             searchFocused = true;
             return;
         }
         searchFocused = false;
 
         for (CategoryColumn column : sortedByZDesc()) {
-            if (column.containsPoint(mouseX, mouseY)) {
+            if (column.containsPoint(lx, ly)) {
                 column.bringToFront(nextZ++);
-                column.mouseClicked(mouseX, mouseY, mouseButton, search);
+                column.mouseClicked(lx, ly, mouseButton, search);
                 layoutDirty = true;
                 return;
             }
@@ -267,8 +289,10 @@ public class ClickGuiScreen extends GuiScreen {
 
     @Override
     protected void mouseClickMove(int mouseX, int mouseY, int clickedMouseButton, long timeSinceLastClick) {
+        int lx = logicalX(mouseX);
+        int ly = logicalY(mouseY);
         for (CategoryColumn column : columns) {
-            column.mouseDragged(mouseX, mouseY);
+            column.mouseDragged(lx, ly);
         }
         super.mouseClickMove(mouseX, mouseY, clickedMouseButton, timeSinceLastClick);
     }
@@ -282,8 +306,10 @@ public class ClickGuiScreen extends GuiScreen {
         }
         int mouseX = Mouse.getEventX() * width / mc.displayWidth;
         int mouseY = height - Mouse.getEventY() * height / mc.displayHeight - 1;
+        int lx = logicalX(mouseX);
+        int ly = logicalY(mouseY);
         for (CategoryColumn column : sortedByZDesc()) {
-            if (column.handleScroll(mouseX, mouseY, wheel, search)) {
+            if (column.handleScroll(lx, ly, wheel, search)) {
                 return;
             }
         }

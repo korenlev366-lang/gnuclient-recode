@@ -13,12 +13,9 @@ import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
 import gnu.client.runtime.packet.OutboundLagQueue;
 import gnu.client.runtime.packet.PacketUtil;
+import gnu.client.utility.CombatTargeting;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.multiplayer.WorldClient;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityLivingBase;
-import net.minecraft.entity.player.EntityPlayer;
-import net.minecraft.util.MovingObjectPosition;
 
 /**
  * raven-bS {@code KnockbackDelay} — uniform inbound freeze ({@code UnifiedLagHandler} semantics).
@@ -54,6 +51,15 @@ public final class KnockbackDelayModule extends Module implements PacketListener
         return kd != null && kd.sessionActive;
     }
 
+    /**
+     * raven {@code ReceivePacketEvent} HIGHEST — must run before Velocity (default 0% H
+     * cancels self S12) so a trade knockback can still open a delay session.
+     */
+    @Override
+    public int sendPriority() {
+        return 100;
+    }
+
     private static KnockbackDelayModule activeInstance() {
         Module mod = ModuleManager.INSTANCE.getModule("KnockbackDelay");
         if (mod instanceof KnockbackDelayModule && mod.isEnabled())
@@ -68,6 +74,8 @@ public final class KnockbackDelayModule extends Module implements PacketListener
         sessionActive = false;
         InboundLagCoordinator.forceReleaseAll();
         flushLagrangeIfEnabled();
+        // Re-register so priority 100 wins even if Velocity was enabled first.
+        PacketEvents.unregister(this);
         PacketEvents.register(this);
     }
 
@@ -144,18 +152,23 @@ public final class KnockbackDelayModule extends Module implements PacketListener
         InboundLagCoordinator.tryAcquire(InboundLagCoordinator.Owner.KNOCKBACK_DELAY);
     }
 
+    /**
+     * Raven {@code KnockbackDelay.conditionsFailureReason} — uses
+     * {@link CombatTargeting} (no hurtTime skip; trading hits must still count as a target).
+     */
     private String conditionsFailureReason(EntityPlayerSP player, WorldClient world) {
         if (player == null || world == null)
             return "null";
 
         double maxSq = distanceToTarget.getValue() * distanceToTarget.getValue();
-        if (findTargetInRange(player, world, maxSq) == null)
+        if (CombatTargeting.findTarget(maxSq) == null)
             return "no target";
 
+        // "In air" ON = require airborne (raven parity). OFF = allow ground.
         if (inAir.getValue() && player.onGround)
             return "on ground";
 
-        if (lookingAtPlayer.getValue() && getMouseOverTarget(player, world, maxSq) == null)
+        if (lookingAtPlayer.getValue() && CombatTargeting.getMouseOverTarget(maxSq) == null)
             return "not looking at player";
 
         if (requireLeftMouse.getValue() && !ClientBootstrap.isLeftMouseDown())
@@ -181,60 +194,5 @@ public final class KnockbackDelayModule extends Module implements PacketListener
         Module lag = ModuleManager.INSTANCE.getModule("Lagrange");
         if (lag instanceof LagrangeModule && lag.isEnabled())
             ((LagrangeModule) lag).flushQueueNow();
-    }
-
-    private EntityPlayer getMouseOverTarget(EntityPlayerSP player, WorldClient world, double maxRangeSq) {
-        MovingObjectPosition mop = Mc.objectMouseOver();
-        if (mop == null)
-            return null;
-        Entity hit = mop.entityHit;
-        if (hit == null || hit == player || !(hit instanceof EntityPlayer))
-            return null;
-        if (hit instanceof EntityLivingBase && ((EntityLivingBase) hit).hurtTime > 0)
-            return null;
-        return eyeToAabbDistSq(player, hit) <= maxRangeSq ? (EntityPlayer) hit : null;
-    }
-
-    private EntityPlayer findTargetInRange(EntityPlayerSP player, WorldClient world, double maxRangeSq) {
-        EntityPlayer mouseTarget = getMouseOverTarget(player, world, maxRangeSq);
-        if (mouseTarget != null)
-            return mouseTarget;
-
-        EntityPlayer best = null;
-        double bestSq = Double.MAX_VALUE;
-        for (EntityPlayer entity : world.playerEntities) {
-            if (entity == null || entity == player)
-                continue;
-            if (entity.hurtTime > 0)
-                continue;
-            double distSq = eyeToAabbDistSq(player, entity);
-            if (distSq > maxRangeSq || distSq >= bestSq)
-                continue;
-            best = entity;
-            bestSq = distSq;
-        }
-        return best;
-    }
-
-    private static double eyeToAabbDistSq(Entity player, Entity entity) {
-        double px = player.posX;
-        double py = player.posY + player.height * 0.85;
-        double pz = player.posZ;
-        double ex = entity.posX;
-        double ey = entity.posY;
-        double ez = entity.posZ;
-        double halfW = entity.width * 0.5f;
-        double h = entity.height;
-        double cx = clamp(px, ex - halfW, ex + halfW);
-        double cy = clamp(py, ey, ey + h);
-        double cz = clamp(pz, ez - halfW, ez + halfW);
-        double dx = cx - px;
-        double dy = cy - py;
-        double dz = cz - pz;
-        return dx * dx + dy * dy + dz * dz;
-    }
-
-    private static double clamp(double v, double min, double max) {
-        return Math.max(min, Math.min(max, v));
     }
 }

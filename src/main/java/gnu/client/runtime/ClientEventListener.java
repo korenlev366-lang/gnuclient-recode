@@ -6,6 +6,7 @@ import gnu.client.module.ModuleManager;
 import gnu.client.event.JumpEvent;
 import gnu.client.event.StrafeEvent;
 import gnu.client.module.modules.combat.AntiBotModule;
+import gnu.client.module.modules.combat.DisplaceModule;
 import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.module.modules.combat.RavenAntiBot;
 import gnu.client.module.modules.combat.ReachModule;
@@ -119,6 +120,7 @@ public final class ClientEventListener {
     @SubscribeEvent
     public void onStrafe(StrafeEvent event) {
         VelocityModule.patchStrafe(event);
+        DisplaceModule.patchStrafe(event);
     }
 
     @SubscribeEvent

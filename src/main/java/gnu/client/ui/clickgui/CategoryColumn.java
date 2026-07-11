@@ -279,7 +279,7 @@ public final class CategoryColumn {
         return true;
     }
 
-    public void render(float alpha, float scale, String search, boolean useBlur,
+    public void render(float alpha, float scale, float userScale, String search, boolean useBlur,
             UiKit.ScissorStack scissors) {
         float openAmt = openAnim.get();
         float h = visibleHeight();
@@ -289,7 +289,7 @@ public final class CategoryColumn {
         float ph = UiKit.PixelAlign.snap(h, scale);
 
         if (useBlur) {
-            UiBlur.drawPanel(px, py, pw, ph, UiKit.RADIUS_PANEL, alpha);
+            UiBlur.drawPanel(px, py, pw, ph, UiKit.RADIUS_PANEL, alpha, userScale);
         } else {
             UiKit.drawRoundedPanel(px, py, pw, ph, UiKit.RADIUS_PANEL,
                     UiKit.withAlpha(UiKit.SURFACE, alpha));
@@ -332,7 +332,7 @@ public final class CategoryColumn {
         Minecraft mc = Minecraft.getMinecraft();
         int displayW = mc != null ? mc.displayWidth : 0;
         int displayH = mc != null ? mc.displayHeight : 0;
-        scissors.pushScaled(px, bodyTop, pw, clipH, scale, displayW, displayH);
+        scissors.pushScaled(px, bodyTop, pw, clipH, scale * userScale, displayW, displayH);
         try {
             float rowY = bodyTop + BODY_PAD - scroll;
             for (ModuleRow row : rows) {

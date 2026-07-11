@@ -30,6 +30,8 @@ public final class ClickGuiModule extends Module {
             new SliderSetting("Animation speed", 1.0f, 0.5f, 2.0f, 0.05f));
     private final SliderSetting panelOpacity = addSetting(
             new SliderSetting("Panel opacity", 0.84f, 0.4f, 1.0f, 0.01f));
+    private final SliderSetting scale = addSetting(
+            new SliderSetting("Scale", 1.0f, 0.75f, 1.50f, 0.05f));
 
     public ClickGuiModule() {
         super(NAME, "Open the in-game ClickGUI menu", Category.SETTINGS);
@@ -57,6 +59,10 @@ public final class ClickGuiModule extends Module {
         return panelOpacity;
     }
 
+    public SliderSetting getScaleSetting() {
+        return scale;
+    }
+
     public UiFont.Mode resolveFontMode() {
         return "Minecraft".equalsIgnoreCase(font.getCurrentMode())
                 ? UiFont.Mode.MINECRAFT
@@ -73,6 +79,15 @@ public final class ClickGuiModule extends Module {
 
     public float getPanelOpacity() {
         return panelOpacity.getValue();
+    }
+
+    public float getScale() {
+        return scale.getValue();
+    }
+
+    public static float resolveScale() {
+        ClickGuiModule gui = instance();
+        return gui != null ? gui.getScale() : 1.0f;
     }
 
     @Override

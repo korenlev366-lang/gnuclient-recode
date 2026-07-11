@@ -149,6 +149,11 @@ public final class UiBlur {
     }
 
     public static void drawPanel(float x, float y, float w, float h, float radius, float alpha) {
+        drawPanel(x, y, w, h, radius, alpha, 1f);
+    }
+
+    public static void drawPanel(float x, float y, float w, float h, float radius, float alpha,
+            float contentScale) {
         int color = UiKit.withAlpha(UiKit.SURFACE, alpha);
         if (!frameActive || sessionFailed) {
             UiKit.drawRoundedPanel(x, y, w, h, radius, color);
@@ -164,7 +169,7 @@ public final class UiBlur {
                 captureAndBlur(mc);
                 captured = true;
             }
-            compositePanel(mc, x, y, w, h, radius, alpha);
+            compositePanel(mc, x, y, w, h, radius, alpha, contentScale);
         } catch (Throwable t) {
             failSession(t.getMessage());
             GnuLog.logError("UiBlur drawPanel failed", t);
@@ -293,12 +298,12 @@ public final class UiBlur {
     }
 
     private static void compositePanel(Minecraft mc, float x, float y, float w, float h,
-            float radius, float alpha) {
+            float radius, float alpha, float contentScale) {
         // Ensure we draw panels to the game target with a full-size viewport.
         restoreMain(mc);
         ScaledResolution sr = new ScaledResolution(mc);
-        float scale = sr.getScaleFactor();
-        UiKit.FbRect scissor = UiKit.PixelAlign.toFramebufferRect(x, y, w, h, scale,
+        float fbScale = sr.getScaleFactor() * (contentScale <= 0f ? 1f : contentScale);
+        UiKit.FbRect scissor = UiKit.PixelAlign.toFramebufferRect(x, y, w, h, fbScale,
                 mc.displayWidth, mc.displayHeight);
 
         GlStateManager.enableBlend();
@@ -312,10 +317,14 @@ public final class UiBlur {
         GL11.glEnable(GL11.GL_SCISSOR_TEST);
         GL11.glScissor(scissor.x, scissor.y, Math.max(0, scissor.width), Math.max(0, scissor.height));
 
-        float u0 = x / sr.getScaledWidth();
-        float v0 = 1f - (y + h) / sr.getScaledHeight();
-        float u1 = (x + w) / sr.getScaledWidth();
-        float v1 = 1f - y / sr.getScaledHeight();
+        float sx = x * contentScale;
+        float sy = y * contentScale;
+        float sw = w * contentScale;
+        float sh = h * contentScale;
+        float u0 = sx / sr.getScaledWidth();
+        float v0 = 1f - (sy + sh) / sr.getScaledHeight();
+        float u1 = (sx + sw) / sr.getScaledWidth();
+        float v1 = 1f - sy / sr.getScaledHeight();
 
         GL11.glBegin(GL11.GL_QUADS);
         GL11.glTexCoord2f(u0, v1);

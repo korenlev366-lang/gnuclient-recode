@@ -1,6 +1,7 @@
 package gnu.client.runtime;
 
 import gnu.client.mixin.impl.accessors.IAccessorEntityPlayerSP;
+import gnu.client.module.modules.combat.DisplaceModule;
 import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.movement.StasisModule;
 import gnu.client.module.modules.player.scaffold.ScaffoldModule;
@@ -40,6 +41,7 @@ public final class PlayerUpdateHook {
         clearRotationOverride();
         StasisModule.onPreUpdate(player);
         ScaffoldModule.onPreUpdate(player);
+        DisplaceModule.onPreUpdate(player);
         KillAuraModule.onPreUpdate(player);
         return false;
     }

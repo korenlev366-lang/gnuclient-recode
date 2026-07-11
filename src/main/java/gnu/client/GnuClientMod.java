@@ -13,6 +13,7 @@ import gnu.client.module.modules.combat.HitSelectModule;
 import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.combat.MoreKBModule;
 import gnu.client.module.modules.combat.ReachModule;
+import gnu.client.module.modules.combat.DisplaceModule;
 import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.module.modules.combat.WTapModule;
 import gnu.client.module.modules.movement.FastStopModule;
@@ -107,6 +108,7 @@ public class GnuClientMod {
         safeRegister(new FastStopModule());
         safeRegister(new TimerModule());
         safeRegister(new VelocityModule());
+        safeRegister(new DisplaceModule());
         safeRegister(new FastPlaceModule());
         safeRegister(new DelayRemoverModule());
         safeRegister(new ScaffoldModule());

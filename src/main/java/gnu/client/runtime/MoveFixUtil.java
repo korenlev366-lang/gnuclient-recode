@@ -3,7 +3,7 @@ package gnu.client.runtime;
 import gnu.client.runtime.mc.Mc;
 
 /**
- * Shared OpenMyau-style silent movefix helpers used by Scaffold and KillAura.
+ * Shared OpenMyau-style silent movefix helpers used by KillAura, Displace, and Scaffold.
  *
  * <p><b>Contract</b> (vanilla-feel physics while C03 uses silent yaw):
  * <ul>
@@ -11,13 +11,15 @@ import gnu.client.runtime.mc.Mc;
  *       {@code moveFlying}/jump via {@link MoveFixHook}; must track <b>sent</b> C03 yaw
  *       while rotations are stepping (not the unfinished target)</li>
  *   <li>{@code packetYaw} — C03 (may step toward {@code moveYaw})</li>
- *   <li>Arm {@link RotationState} only when MoveFix is enabled (KA priority 1 / Scaffold 3)</li>
+ *   <li>Arm {@link RotationState} only when MoveFix is enabled
+ *       (KA priority 1 / Displace 2 / Scaffold 3)</li>
  *   <li>Attack slow: OpenMyau local {@code motion *= 0.6} + clear sprint; never scale S12</li>
  * </ul>
  */
 public final class MoveFixUtil {
 
     public static final int KILLAURA_MOVE_FIX_PRIORITY = 1;
+    public static final int DISPLACE_MOVE_FIX_PRIORITY = 2;
     public static final int SCAFFOLD_MOVE_FIX_PRIORITY = 3;
 
     private MoveFixUtil() {}

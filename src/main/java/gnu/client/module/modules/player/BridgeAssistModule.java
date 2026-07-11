@@ -1,26 +1,25 @@
 package gnu.client.module.modules.player;
 
+import gnu.client.event.ClientRotationEvent;
+import gnu.client.event.PrePlayerInputEvent;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.PacketEvents;
-import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
+import gnu.client.utility.BlockUtils;
+import gnu.client.utility.IMinecraftInstance;
 import gnu.client.utility.RotationUtils;
-import net.minecraft.client.entity.EntityPlayerSP;
-import net.minecraft.client.multiplayer.PlayerControllerMP;
-import net.minecraft.client.multiplayer.WorldClient;
+import gnu.client.utility.Utils;
+import gnu.client.utility.sim.SimulatedPlayer;
 import net.minecraft.item.ItemBlock;
 import net.minecraft.item.ItemStack;
-import net.minecraft.util.AxisAlignedBB;
-import net.minecraft.util.BlockPos;
-import net.minecraft.util.EnumFacing;
-import net.minecraft.util.MathHelper;
-import net.minecraft.util.MovementInput;
-import net.minecraft.util.MovingObjectPosition;
-import net.minecraft.world.World;
+import net.minecraft.network.play.client.C08PacketPlayerBlockPlacement;
+import net.minecraft.util.*;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,40 +29,31 @@ import java.util.List;
  * aims at valid block placements (pre-place rotation). Ported from raven-bS
  * {@code BridgeAssist}.
  */
-public final class BridgeAssistModule extends Module implements PacketListener {
+public final class BridgeAssistModule extends Module implements PacketListener, IMinecraftInstance {
 
-    // ── Static sneak state (read from patchMovementInput mixin hook) ────
-    public static volatile boolean forceSneak = false;
-    /** When true, vanilla shift sneak is cleared before forceSneak is applied. */
-    public static volatile boolean suppressSneak = false;
+    private static final EnumFacing[] SIDES = {
+            EnumFacing.NORTH, EnumFacing.SOUTH, EnumFacing.EAST, EnumFacing.WEST
+    };
 
-    // ── Settings ─────────────────────────────────────────────────────────
+    private final BoolSetting prePlace = addSetting(new BoolSetting("Pre place", false));
     private final SliderSetting edgeOffset = addSetting(
-            new SliderSetting("Edge Offset", 0.0f, 0.0f, 0.3f));
+            new SliderSetting("Edge offset", 0.0f, 0.0f, 0.3f, 0.01f));
     private final SliderSetting unsneakDelay = addSetting(
-            new SliderSetting("Unsneak Delay", 50.0f, 50.0f, 300.0f));
-    private final SliderSetting sneakOnJumpMs = addSetting(
-            new SliderSetting("Sneak On Jump", 0.0f, 0.0f, 500.0f));
-    private final BoolSetting sneakKeyRequired = addSetting(
-            new BoolSetting("Sneak Key Required", false));
-    private final BoolSetting holdingBlocksOnly = addSetting(
-            new BoolSetting("Holding Blocks", false));
-    private final BoolSetting lookingDownOnly = addSetting(
-            new BoolSetting("Looking Down", false));
-    private final BoolSetting notMovingForwardOnly = addSetting(
-            new BoolSetting("Not Moving Forward", false));
-    private final BoolSetting prePlaceRotation = addSetting(
-            new BoolSetting("Pre-place Rotation", false));
+            new SliderSetting("Unsneak delay", 50.0f, 50.0f, 300.0f, 5.0f));
+    private final SliderSetting sneakOnJump = addSetting(
+            new SliderSetting("Sneak on jump", 0.0f, 0.0f, 500.0f, 5.0f));
+    private final BoolSetting sneakKeyPressed = addSetting(new BoolSetting("Sneak key pressed", false));
+    private final BoolSetting holdingBlocks = addSetting(new BoolSetting("Holding blocks", false));
+    private final BoolSetting lookingDown = addSetting(new BoolSetting("Looking down", false));
+    private final BoolSetting notMovingForward = addSetting(new BoolSetting("Not moving forward", false));
 
-    // ── Running state ────────────────────────────────────────────────────
     private boolean sneakingFromModule;
     private boolean placed;
     private boolean forceRelease;
-    private int sneakJumpStartTick = -1;
     private int sneakJumpDelayTicks = -1;
-    private int unsneakStartTick = -1;
+    private int sneakJumpStartTick = -1;
     private int unsneakDelayTicks = -1;
-    private int tickCounter;
+    private int unsneakStartTick = -1;
 
     public BridgeAssistModule() {
         super("Bridge Assist", "Auto-sneak at block edges with bridging assistance",
@@ -72,229 +62,134 @@ public final class BridgeAssistModule extends Module implements PacketListener {
 
     @Override
     public void onEnable() {
-        tickCounter = 0;
         resetState();
+        MinecraftForge.EVENT_BUS.register(this);
         PacketEvents.register(this);
     }
 
     @Override
     public void onDisable() {
+        MinecraftForge.EVENT_BUS.unregister(this);
         PacketEvents.unregister(this);
-        resetState();
         sneakingFromModule = false;
-        forceSneak = false;
-        suppressSneak = false;
-        Mc.setSneaking(Mc.player(), false);
+        resetUnsneak();
     }
-
-    // ── Tick logic ───────────────────────────────────────────────────────
 
     @Override
-    public void onTick() {
-        if (!isEnabled()) {
-            forceSneak = false;
-            suppressSneak = false;
+    public String[] getSuffix() {
+        float v = edgeOffset.getValue();
+        String s = v == Math.rint(v) ? Integer.toString((int) v) : String.format("%.2f", v);
+        return new String[] { s };
+    }
+
+    @SubscribeEvent
+    public void onPrePlayerInput(PrePlayerInputEvent e) {
+        if (!Utils.nullCheck() || mc.currentScreen != null || mc.thePlayer.capabilities.isFlying)
             return;
-        }
 
-        tickCounter++;
-        int currentTick = tickCounter;
-
-        EntityPlayerSP player = Mc.player();
-        WorldClient world = Mc.world();
-        if (player == null || world == null) {
-            forceSneak = false;
-            suppressSneak = false;
-            sneakingFromModule = false;
-            return;
-        }
-
-        if (Mc.currentScreen() != null) {
-            forceSneak = false;
-            suppressSneak = false;
-            sneakingFromModule = false;
-            return;
-        }
-
-        if (!player.onGround) {
-            clearSneakState();
-            return;
-        }
-
-        // ── Condition: sneak key required ───────────────────────────────
         boolean manualSneak = isManualSneak();
-        if (sneakKeyRequired.getValue()) {
-            if (!manualSneak) {
-                clearSneakState();
+        boolean requireSneak = sneakKeyPressed.getValue();
+
+        if (manualSneak && !requireSneak) {
+            resetUnsneak();
+            return;
+        }
+
+        if (requireSneak && (!manualSneak || (e.getForward() == 0 && e.getStrafe() == 0))) {
+            if (!manualSneak)
+                resetUnsneak();
+            repressSneak(e);
+            return;
+        }
+
+        if (notMovingForward.getValue() && e.getForward() > 0) {
+            clearSneak(e);
+            return;
+        }
+        if (lookingDown.getValue() && mc.thePlayer.rotationPitch < 70) {
+            clearSneak(e);
+            return;
+        }
+        if (holdingBlocks.getValue()) {
+            ItemStack held = mc.thePlayer.getHeldItem();
+            if (held == null || !(held.getItem() instanceof ItemBlock)) {
+                clearSneak(e);
                 return;
             }
-            if (!isMoving(player)) {
-                suppressSneak = true;
-                forceSneak = false;
-                sneakingFromModule = false;
-                Mc.setSneaking(player, true);
-                return;
-            }
-            suppressSneak = false;
         }
 
-        // ── Condition: not moving forward ───────────────────────────────
-        if (notMovingForwardOnly.getValue() && isMovingForward(player)) {
-            clearSneakState();
-            return;
-        }
-
-        // ── Condition: looking down (pitch >= 70) ───────────────────────
-        float pitch = player.rotationPitch;
-        if (lookingDownOnly.getValue() && pitch < 70.0f) {
-            clearSneakState();
-            return;
-        }
-
-        // ── Condition: holding blocks ───────────────────────────────────
-        if (holdingBlocksOnly.getValue() && !isHoldingBlock(player)) {
-            clearSneakState();
-            return;
-        }
-
-        // ── Edge detection (predictive: uses predicted AABB one tick ahead) ─
-        AABBCoords predictedAABB = computePredictedAABB(player);
-        boolean nearEdge = computeNearEdge(predictedAABB, world);
-        double offset = computeEdgeDistance(predictedAABB, world);
-
-        if (Double.isNaN(offset)) {
-            if (player.onGround) {
-                pressSneak(player, true);
-            } else if (sneakingFromModule) {
-                releaseSneak(player, true);
-            }
-            return;
-        }
-
-        // ── Sneak on jump ───────────────────────────────────────────────
-        boolean jumpHeld = isJumpHeld();
-        if (sneakOnJumpMs.getValue() > 0.0f && jumpHeld && (nearEdge || offset > edgeOffset.getValue())) {
-            if (!sneakingFromModule || forceRelease) {
-                sneakJumpStartTick = currentTick;
-                double raw = sneakOnJumpMs.getValue() / 50.0;
+        if (e.isJump() && mc.thePlayer.onGround && (e.getForward() != 0 || e.getStrafe() != 0)
+                && sneakOnJump.getValue() > 0) {
+            if (!requireSneak || forceRelease) {
+                sneakJumpStartTick = mc.thePlayer.ticksExisted;
+                double raw = sneakOnJump.getValue() / 50.0;
                 int base = (int) raw;
                 sneakJumpDelayTicks = base + (Math.random() < (raw - base) ? 1 : 0);
-                pressSneak(player, true);
+                pressSneak(e, true);
                 return;
             }
         }
 
-        // ── Unsneak delay management ────────────────────────────────────
-        if (sneakingFromModule) {
-            boolean shouldRelease = !nearEdge && offset <= edgeOffset.getValue();
+        SimulatedPlayer sim = SimulatedPlayer.fromClientPlayer(mc.thePlayer.movementInput);
+        sim.movementInput.sneak = false;
+        sim.tick();
 
-            if (shouldRelease) {
-                if (unsneakStartTick == -1 && sneakJumpStartTick == -1) {
-                    unsneakStartTick = currentTick;
-                    double raw = (unsneakDelay.getValue() - 50) / 50.0;
-                    int base = (int) raw;
-                    unsneakDelayTicks = base + (Math.random() < (raw - base) ? 1 : 0);
-                }
+        double offset = computeEdgeOffset(sim.getEntityBoundingBox());
 
-                if (sneakJumpStartTick != -1
-                        && currentTick - sneakJumpStartTick < sneakJumpDelayTicks) {
-                    pressSneak(player, false);
-                    return;
-                }
-
-                if (unsneakStartTick != -1
-                        && currentTick - unsneakStartTick < unsneakDelayTicks) {
-                    pressSneak(player, false);
-                    return;
-                }
-
-                releaseSneak(player, true);
-                return;
+        if (Double.isNaN(offset)) {
+            if (e.isJump() && (sneakOnJump.getValue() <= 0 || (e.getForward() == 0 && e.getStrafe() == 0))) {
+                if (sneakingFromModule)
+                    tryReleaseSneak(e, true);
+            } else if (mc.thePlayer.onGround) {
+                pressSneak(e, true);
+            } else if (sneakingFromModule) {
+                tryReleaseSneak(e, true);
             }
-
-            unsneakStartTick = -1;
-            sneakJumpStartTick = -1;
-            pressSneak(player, true);
             return;
         }
 
-        // ── Edge-triggered sneak start ──────────────────────────────────
-        if (nearEdge || offset > edgeOffset.getValue()) {
-            pressSneak(player, true);
-        }
-
-        // ── Pre-place rotation ──────────────────────────────────────────
-        if (prePlaceRotation.getValue() && sneakingFromModule
-                && isHoldingBlock(player) && pitch >= 60.0f) {
-            applyPrePlaceRotation(player, world);
+        if (offset > edgeOffset.getValue()) {
+            pressSneak(e, true);
+        } else if (sneakingFromModule) {
+            tryReleaseSneak(e, true);
         }
     }
 
-    // ── Rotation (pre-place aiming) ──────────────────────────────────────
-
-    private void applyPrePlaceRotation(EntityPlayerSP player, World world) {
-        double reach = getBlockReachDistance();
-        float currentPitch = player.rotationPitch;
-        float currentYaw = player.rotationYaw;
-
-        List<FaceTarget> targets = findFaceTargets(player, world);
-        if (targets.isEmpty())
+    @SubscribeEvent
+    public void onClientRotation(ClientRotationEvent e) {
+        if (!prePlace.getValue())
+            return;
+        if (!Utils.nullCheck() || mc.currentScreen != null || mc.thePlayer.capabilities.isFlying)
             return;
 
-        float bestPitch = Float.NaN;
-        float bestDelta = Float.MAX_VALUE;
-        float randScale = 0.2f;
-
-        for (float scanPitch = 60f; scanPitch <= 90f; ) {
-            float step = 1.0f + (float) (Math.random() * 2 - 1) * (0.3f + randScale * 0.4f);
-            if (step < 0.4f) step = 0.4f;
-            if (step > 1.8f) step = 1.8f;
-            scanPitch += step;
-            float samplePitch = Math.min(scanPitch, 90f);
-
-            MovingObjectPosition hitResult = RotationUtils.rayTraceCustom(reach, currentYaw, samplePitch);
-            if (hitResult == null || hitResult.typeOfHit != MovingObjectPosition.MovingObjectType.BLOCK)
-                continue;
-
-            EnumFacing sideHit = hitResult.sideHit;
-            if (sideHit == null)
-                continue;
-            int sideOrdinal = sideHit.ordinal();
-            if (sideOrdinal == 0 || sideOrdinal == 1)
-                continue;
-
-            BlockPos hitBlockPos = hitResult.getBlockPos();
-            if (hitBlockPos == null)
-                continue;
-
-            for (FaceTarget ft : targets) {
-                if (hitBlockPos.equals(ft.block) && sideOrdinal == ft.face) {
-                    float delta = Math.abs(samplePitch - currentPitch);
-                    if (delta < bestDelta) {
-                        bestDelta = delta;
-                        bestPitch = samplePitch;
-                    }
-                    break;
-                }
-            }
-            if (scanPitch >= 90f) break;
-        }
-
-        if (Float.isNaN(bestPitch))
+        ItemStack held = mc.thePlayer.getHeldItem();
+        if (held == null || !(held.getItem() instanceof ItemBlock))
+            return;
+        if (lookingDown.getValue() && mc.thePlayer.rotationPitch < 70f)
+            return;
+        if (notMovingForward.getValue() && mc.thePlayer.movementInput.moveForward > 0f)
             return;
 
-        float smoothedPitch = smoothRotation(currentPitch, bestPitch, 15f, 20f);
-        player.rotationPitch = smoothedPitch;
+        float basePitch = e.pitch != null ? e.pitch : RotationUtils.serverRotations[1];
+        double reach = mc.playerController.getBlockReachDistance();
+
+        TargetResult target = findTarget(basePitch, reach);
+        if (target == null)
+            return;
+
+        float baseYaw = e.yaw != null ? e.yaw : RotationUtils.serverRotations[0];
+        float[] sm = RotationUtils.smoothRotation(baseYaw, basePitch, target.yaw, target.pitch, 15, 20f);
+
+        e.setYaw(sm[0]);
+        e.setPitch(sm[1]);
     }
-
-    // ── PacketListener ──────────────────────────────────────────────────
 
     @Override
     public boolean onSend(Object packet) {
-        if (packet != null && PacketHelper.isBlockPlacement(packet)) {
-            if (sneakingFromModule && sneakKeyRequired.getValue()) {
+        if (packet instanceof C08PacketPlayerBlockPlacement) {
+            C08PacketPlayerBlockPlacement c08 = (C08PacketPlayerBlockPlacement) packet;
+            if (c08.getPlacedBlockDirection() != 255 && sneakingFromModule && sneakKeyPressed.getValue())
                 placed = true;
-            }
         }
         return false;
     }
@@ -304,243 +199,68 @@ public final class BridgeAssistModule extends Module implements PacketListener {
         return false;
     }
 
-    // ── Static patchMovementInput (called from MovementInputHook) ───────
-
-    public static void patchMovementInput(Object movInput) {
-        if (!(movInput instanceof MovementInput))
-            return;
-
-        MovementInput input = (MovementInput) movInput;
-        boolean vanillaSneak = input.sneak;
-        float moveForward = input.moveForward;
-        float moveStrafe = input.moveStrafe;
-
-        boolean finalSneak = vanillaSneak;
-        if (suppressSneak)
-            finalSneak = false;
-        if (forceSneak)
-            finalSneak = true;
-
-        if (!vanillaSneak && finalSneak) {
-            moveForward *= 0.3F;
-            moveStrafe *= 0.3F;
-        } else if (vanillaSneak && !finalSneak) {
-            if (moveForward != 0f)
-                moveForward /= 0.3F;
-            if (moveStrafe != 0f)
-                moveStrafe /= 0.3F;
-        }
-
-        input.sneak = finalSneak;
-        input.moveForward = moveForward;
-        input.moveStrafe = moveStrafe;
-    }
-
-    // ── Sneak control ────────────────────────────────────────────────────
-
-    private void pressSneak(EntityPlayerSP player, boolean resetDelay) {
-        forceSneak = true;
+    private void pressSneak(PrePlayerInputEvent e, boolean resetDelay) {
+        e.setSneak(true);
         sneakingFromModule = true;
-        if (resetDelay) {
+        if (resetDelay)
             unsneakStartTick = -1;
-            sneakJumpStartTick = -1;
-        }
-        Mc.setSneaking(player, true);
+        repressSneak(e);
     }
 
-    private void releaseSneak(EntityPlayerSP player, boolean resetDelay) {
-        EntityPlayerSP local = Mc.player();
-        if (sneakKeyRequired.getValue() && sneakingFromModule
-                && isManualSneak() && local != null && (placed || !local.onGround)) {
+    private void tryReleaseSneak(PrePlayerInputEvent e, boolean resetDelay) {
+        int existed = mc.thePlayer.ticksExisted;
+        if (unsneakStartTick == -1 && sneakJumpStartTick == -1) {
+            unsneakStartTick = existed;
+            double raw = (unsneakDelay.getValue() - 50) / 50.0;
+            int base = (int) raw;
+            unsneakDelayTicks = base + (Math.random() < (raw - base) ? 1 : 0);
+        }
+
+        if (sneakJumpStartTick != -1 && existed - sneakJumpStartTick < sneakJumpDelayTicks) {
+            pressSneak(e, false);
+            return;
+        }
+        if (unsneakStartTick != -1 && existed - unsneakStartTick < unsneakDelayTicks) {
+            pressSneak(e, false);
+            return;
+        }
+
+        releaseSneak(e, resetDelay);
+    }
+
+    private void releaseSneak(PrePlayerInputEvent e, boolean resetDelay) {
+        if (!sneakKeyPressed.getValue()) {
+            e.setSneak(false);
+        } else if (sneakingFromModule && isManualSneak() && (placed || !mc.thePlayer.onGround)) {
             Mc.setKeyBindState(Mc.settings().keyBindSneak, false);
+            e.setSneak(false);
             forceRelease = true;
         } else if (forceRelease) {
-            // Keep released
+            e.setSneak(false);
         }
 
-        forceSneak = false;
         sneakingFromModule = false;
         placed = false;
-        if (resetDelay) resetUnsneakTimers();
-        Mc.setSneaking(player, false);
+        if (resetDelay)
+            resetUnsneak();
     }
 
-    private void repressSneak(EntityPlayerSP player) {
+    private void repressSneak(PrePlayerInputEvent e) {
         if (forceRelease && isManualSneak()) {
             Mc.setKeyBindState(Mc.settings().keyBindSneak, true);
-            forceSneak = true;
-            sneakingFromModule = true;
-            Mc.setSneaking(player, true);
+            e.setSneak(true);
         }
         forceRelease = false;
     }
 
-    private void clearSneak() {
+    private void clearSneak(PrePlayerInputEvent e) {
         sneakingFromModule = false;
-        resetUnsneakTimers();
-        forceSneak = false;
-        suppressSneak = false;
-        repressSneak(Mc.player());
+        resetUnsneak();
+        if (sneakKeyPressed.getValue())
+            repressSneak(e);
     }
 
-    private void clearSneakState() {
-        sneakingFromModule = false;
-        forceSneak = false;
-        suppressSneak = false;
-        resetUnsneakTimers();
-        Mc.setSneaking(Mc.player(), false);
-    }
-
-    // ── Edge detection ───────────────────────────────────────────────────
-
-    private boolean computeNearEdge(AABBCoords coords, World world) {
-        if (coords == null) return false;
-
-        int by = (int) Math.floor(coords.minY - 0.01);
-        double cx = (coords.minX + coords.maxX) * 0.5;
-        double cz = (coords.minZ + coords.maxZ) * 0.5;
-
-        int bxLo = (int) Math.floor(coords.minX);
-        int bxHi = (int) Math.floor(coords.maxX);
-        int bzLo = (int) Math.floor(coords.minZ);
-        int bzHi = (int) Math.floor(coords.maxZ);
-
-        boolean hasGround = false;
-        double minDist = Double.POSITIVE_INFINITY;
-
-        for (int bx = bxLo; bx <= bxHi; bx++) {
-            for (int bz = bzLo; bz <= bzHi; bz++) {
-                if (isAirBlock(world, bx, by, bz))
-                    continue;
-                hasGround = true;
-                double closestX = clamp(cx, bx, bx + 1.0);
-                double closestZ = clamp(cz, bz, bz + 1.0);
-                double dist = Math.max(Math.abs(cx - closestX), Math.abs(cz - closestZ));
-                if (dist < minDist)
-                    minDist = dist;
-            }
-        }
-
-        return hasGround && minDist > edgeOffset.getValue();
-    }
-
-    private double computeEdgeDistance(AABBCoords coords, World world) {
-        if (coords == null) return Double.NaN;
-
-        int by = (int) Math.floor(coords.minY - 0.01);
-        double cx = (coords.minX + coords.maxX) * 0.5;
-        double cz = (coords.minZ + coords.maxZ) * 0.5;
-
-        int bxLo = (int) Math.floor(coords.minX);
-        int bxHi = (int) Math.floor(coords.maxX);
-        int bzLo = (int) Math.floor(coords.minZ);
-        int bzHi = (int) Math.floor(coords.maxZ);
-
-        double minDist = Double.POSITIVE_INFINITY;
-        for (int bx = bxLo; bx <= bxHi; bx++) {
-            for (int bz = bzLo; bz <= bzHi; bz++) {
-                if (isAirBlock(world, bx, by, bz))
-                    continue;
-                double closestX = clamp(cx, bx, bx + 1.0);
-                double closestZ = clamp(cz, bz, bz + 1.0);
-                double dist = Math.max(Math.abs(cx - closestX), Math.abs(cz - closestZ));
-                if (dist < minDist) minDist = dist;
-            }
-        }
-
-        return minDist == Double.POSITIVE_INFINITY ? Double.NaN : minDist;
-    }
-
-    // ── Face targeting for pre-place rotation ────────────────────────────
-
-    private static final int[] SIDE_ORDINALS = {2, 3, 4, 5}; // NORTH, SOUTH, EAST, WEST
-
-    private List<FaceTarget> findFaceTargets(EntityPlayerSP player, World world) {
-        List<FaceTarget> targets = new ArrayList<>();
-        AxisAlignedBB aabb = player.getEntityBoundingBox();
-        if (aabb == null)
-            return targets;
-
-        double minX = aabb.minX;
-        double maxX = aabb.maxX;
-        double minY = aabb.minY;
-        double minZ = aabb.minZ;
-        double maxZ = aabb.maxZ;
-
-        int standY = (int) Math.floor(minY) - 1;
-        int bxLo = (int) Math.floor(minX);
-        int bxHi = (int) Math.floor(maxX);
-        int bzLo = (int) Math.floor(minZ);
-        int bzHi = (int) Math.floor(maxZ);
-
-        for (int x = bxLo; x <= bxHi; x++) {
-            for (int z = bzLo; z <= bzHi; z++) {
-                if (isAirBlock(world, x, standY, z))
-                    continue;
-                for (int face : SIDE_ORDINALS) {
-                    int nx = x + (face == 4 ? -1 : face == 5 ? 1 : 0);
-                    int nz = z + (face == 2 ? -1 : face == 3 ? 1 : 0);
-                    if (isAirBlock(world, nx, standY, nz)) {
-                        targets.add(new FaceTarget(new BlockPos(x, standY, z), face));
-                    }
-                }
-            }
-        }
-        return targets;
-    }
-
-    // ── MC helpers ───────────────────────────────────────────────────────
-
-    private static boolean isAirBlock(World world, int x, int y, int z) {
-        return world.isAirBlock(new BlockPos(x, y, z));
-    }
-
-    private boolean isHoldingBlock(EntityPlayerSP player) {
-        if (player == null)
-            return false;
-        ItemStack stack = player.getHeldItem();
-        return stack != null && stack.getItem() instanceof ItemBlock;
-    }
-
-    private boolean isManualSneak() {
-        return Mc.isSneakKeyHeld();
-    }
-
-    private boolean isJumpHeld() {
-        return Mc.isJumpKeyHeld();
-    }
-
-    private boolean isMovingForward(EntityPlayerSP player) {
-        if (player == null || player.movementInput == null)
-            return false;
-        return player.movementInput.moveForward > 0.0f;
-    }
-
-    private boolean isMoving(EntityPlayerSP player) {
-        if (player == null || player.movementInput == null)
-            return false;
-        MovementInput input = player.movementInput;
-        return input.moveForward != 0.0f || input.moveStrafe != 0.0f;
-    }
-
-    private double getBlockReachDistance() {
-        PlayerControllerMP controller = Mc.controller();
-        return controller != null ? controller.getBlockReachDistance() : 4.5;
-    }
-
-    private float smoothRotation(float current, float target, float maxStep, float smoothFactor) {
-        float delta = target - current;
-        if (Math.abs(delta) > maxStep) {
-            delta = Math.signum(delta) * maxStep;
-        }
-        float alpha = smoothFactor / 100.0f;
-        if (alpha > 1.0f) alpha = 1.0f;
-        return current + delta * alpha;
-    }
-
-    // ── Utility ──────────────────────────────────────────────────────────
-
-    private void resetUnsneakTimers() {
+    private void resetUnsneak() {
         unsneakStartTick = -1;
         sneakJumpStartTick = -1;
         sneakJumpDelayTicks = -1;
@@ -548,85 +268,132 @@ public final class BridgeAssistModule extends Module implements PacketListener {
     }
 
     private void resetState() {
-        resetUnsneakTimers();
+        resetUnsneak();
         sneakingFromModule = false;
         placed = false;
         forceRelease = false;
     }
 
-    private static double clamp(double v, double lo, double hi) {
-        if (v < lo) return lo;
-        if (v > hi) return hi;
-        return v;
+    private boolean isManualSneak() {
+        return Mc.isSneakKeyHeld();
     }
 
-    // ── Inner types ──────────────────────────────────────────────────────
+    private double computeEdgeOffset(AxisAlignedBB simBox) {
+        AxisAlignedBB groundCheck = new AxisAlignedBB(
+                simBox.minX, simBox.minY - 0.01, simBox.minZ,
+                simBox.maxX, simBox.minY, simBox.maxZ);
 
-    private static class FaceTarget {
+        List<AxisAlignedBB> groundBoxes = mc.theWorld.getCollidingBoundingBoxes(mc.thePlayer, groundCheck);
+        if (groundBoxes.isEmpty())
+            return Double.NaN;
+
+        double feetX = (simBox.minX + simBox.maxX) / 2.0;
+        double feetZ = (simBox.minZ + simBox.maxZ) / 2.0;
+
+        double minDist = Double.MAX_VALUE;
+        for (AxisAlignedBB box : groundBoxes) {
+            double closestX = Math.max(box.minX, Math.min(feetX, box.maxX));
+            double closestZ = Math.max(box.minZ, Math.min(feetZ, box.maxZ));
+            double dx = Math.abs(feetX - closestX);
+            double dz = Math.abs(feetZ - closestZ);
+            double dist = Math.max(dx, dz);
+            minDist = Math.min(minDist, dist);
+        }
+
+        return minDist;
+    }
+
+    private TargetResult findTarget(float currentPitch, double reach) {
+        float yaw = mc.thePlayer.rotationYaw;
+
+        AxisAlignedBB bbox = mc.thePlayer.getEntityBoundingBox();
+        int standY = MathHelper.floor_double(bbox.minY) - 1;
+        int minX = MathHelper.floor_double(bbox.minX);
+        int maxX = MathHelper.floor_double(bbox.maxX);
+        int minZ = MathHelper.floor_double(bbox.minZ);
+        int maxZ = MathHelper.floor_double(bbox.maxZ);
+
+        ArrayList<FaceTarget> targets = new ArrayList<>();
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                BlockPos standBlock = new BlockPos(x, standY, z);
+                if (BlockUtils.replaceable(standBlock))
+                    continue;
+                for (EnumFacing face : SIDES) {
+                    BlockPos placed = standBlock.offset(face);
+                    if (!BlockUtils.replaceable(placed))
+                        continue;
+                    targets.add(new FaceTarget(standBlock, face));
+                }
+            }
+        }
+        if (targets.isEmpty())
+            return null;
+
+        float bestDelta = Float.MAX_VALUE;
+        float bestPitch = Float.NaN;
+        BlockPos bestSupport = null;
+        EnumFacing bestFace = null;
+        float randScale = 0.2f;
+
+        for (float pitch = 60f; pitch <= 90f; ) {
+            float step = 1.0f + (float) (Math.random() * 2 - 1) * (0.3f + randScale * 0.4f);
+            if (step < 0.4f)
+                step = 0.4f;
+            if (step > 1.8f)
+                step = 1.8f;
+            pitch += step;
+            float samplePitch = Math.min(pitch, 90f);
+            MovingObjectPosition mop = RotationUtils.rayCastBlock(reach, yaw, samplePitch);
+            if (mop == null)
+                continue;
+            EnumFacing hitFace = mop.sideHit;
+            if (hitFace == EnumFacing.UP || hitFace == EnumFacing.DOWN)
+                continue;
+
+            BlockPos hitBlock = mop.getBlockPos();
+            for (FaceTarget t : targets) {
+                if (hitBlock.equals(t.block) && hitFace == t.face) {
+                    float delta = Math.abs(samplePitch - currentPitch);
+                    if (delta < bestDelta) {
+                        bestDelta = delta;
+                        bestPitch = samplePitch;
+                        bestSupport = t.block;
+                        bestFace = t.face;
+                    }
+                    break;
+                }
+            }
+            if (pitch >= 90f)
+                break;
+        }
+
+        if (bestSupport == null || bestFace == null || Float.isNaN(bestPitch))
+            return null;
+        return new TargetResult(yaw, bestPitch, bestSupport, bestFace);
+    }
+
+    private static final class FaceTarget {
         final BlockPos block;
-        final int face;
+        final EnumFacing face;
 
-        FaceTarget(BlockPos block, int face) {
+        FaceTarget(BlockPos block, EnumFacing face) {
             this.block = block;
             this.face = face;
         }
     }
 
-    private static final class AABBCoords {
-        final double minX, maxX, minY, minZ, maxZ;
+    private static final class TargetResult {
+        final float yaw;
+        final float pitch;
+        final BlockPos support;
+        final EnumFacing face;
 
-        AABBCoords(double minX, double maxX, double minY, double minZ, double maxZ) {
-            this.minX = minX;
-            this.maxX = maxX;
-            this.minY = minY;
-            this.minZ = minZ;
-            this.maxZ = maxZ;
+        TargetResult(float yaw, float pitch, BlockPos support, EnumFacing face) {
+            this.yaw = yaw;
+            this.pitch = pitch;
+            this.support = support;
+            this.face = face;
         }
-    }
-
-    private AABBCoords computePredictedAABB(EntityPlayerSP player) {
-        AxisAlignedBB aabb = player.getEntityBoundingBox();
-        if (aabb == null)
-            return null;
-
-        double minX = aabb.minX;
-        double maxX = aabb.maxX;
-        double minY = aabb.minY;
-        double minZ = aabb.minZ;
-        double maxZ = aabb.maxZ;
-
-        double motionX = player.motionX;
-        double motionZ = player.motionZ;
-
-        if (forceSneak) {
-            motionX /= 0.3;
-            motionZ /= 0.3;
-        }
-
-        if (motionX == 0.0 && motionZ == 0.0) {
-            return new AABBCoords(minX, maxX, minY, minZ, maxZ);
-        }
-
-        MovementInput movInput = player.movementInput;
-        if (movInput != null) {
-            float forward = movInput.moveForward;
-            float strafe = movInput.moveStrafe;
-            if (forward != 0.0f || strafe != 0.0f) {
-                float yawRad = (float) Math.toRadians(player.rotationYaw);
-                float f = forward * 0.98f;
-                float s = strafe * 0.98f;
-                double accelX = (s * MathHelper.cos(yawRad)
-                        - f * MathHelper.sin(yawRad)) * 0.02;
-                double accelZ = (f * MathHelper.cos(yawRad)
-                        + s * MathHelper.sin(yawRad)) * 0.02;
-                motionX = motionX * 0.91 + accelX;
-                motionZ = motionZ * 0.91 + accelZ;
-            }
-        }
-
-        return new AABBCoords(
-                minX + motionX, maxX + motionX, minY,
-                minZ + motionZ, maxZ + motionZ
-        );
     }
 }
