@@ -91,6 +91,12 @@ public final class LagrangeModule extends Module implements PacketListener {
 
     public LagrangeModule() {
         super("Lagrange", "Raven Lag Range outbound delay", Category.COMBAT);
+        showInFirstPerson.visibleWhen(() -> realPositionIndicator.getValue());
+        espRed.visibleWhen(() -> realPositionIndicator.getValue());
+        espGreen.visibleWhen(() -> realPositionIndicator.getValue());
+        espBlue.visibleWhen(() -> realPositionIndicator.getValue());
+        espFilled.visibleWhen(() -> realPositionIndicator.getValue());
+        espLineWidth.visibleWhen(() -> realPositionIndicator.getValue());
     }
 
     // ── Raven UnifiedLagHandler singleton access ───────────────────────

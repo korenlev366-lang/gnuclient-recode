@@ -114,6 +114,15 @@ public final class WTapModule extends Module implements PacketListener {
 
     public WTapModule() {
         super("W Tap", "Resets sprint to increase knockback (SuperKnockback)", Category.COMBAT);
+        packetBursts.visibleWhen(() -> mode.getValue() == 0);
+        packetRestoreSprint.visibleWhen(() -> mode.getValue() == 0);
+        sprintTapDelay.visibleWhen(() -> mode.getValue() == 1);
+        sprintTapWait.visibleWhen(() -> mode.getValue() == 1);
+        legitTickDelay.visibleWhen(() -> mode.getValue() == 2);
+        legitDuration.visibleWhen(() -> mode.getValue() == 2);
+        legitStartDelay.visibleWhen(() -> mode.getValue() == 2);
+        legitSprintingOnly.visibleWhen(() -> mode.getValue() == 2);
+        legitDisableOnHit.visibleWhen(() -> mode.getValue() == 2);
     }
 
     // ── Static hooks for external modules ─────────────────────────────────

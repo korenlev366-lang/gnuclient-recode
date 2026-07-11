@@ -52,12 +52,13 @@ public final class NoSlowModule extends Module {
 
     public NoSlowModule() {
         super("NoSlow", "Cancel item-use slowdown (sword/food/bow)", Category.PLAYER);
-        updateSettingVisibility();
-    }
-
-    @Override
-    public void guiUpdate() {
-        updateSettingVisibility();
+        swordMotion.visibleWhen(() -> swordMode.getValue() == MODE_VANILLA);
+        swordSprint.visibleWhen(() -> swordMode.getValue() != MODE_NONE);
+        killAuraOnly.visibleWhen(() -> swordMode.getValue() != MODE_NONE);
+        foodMotion.visibleWhen(() -> foodMode.getValue() == MODE_VANILLA);
+        foodSprint.visibleWhen(() -> foodMode.getValue() != MODE_NONE);
+        bowMotion.visibleWhen(() -> bowMode.getValue() == MODE_VANILLA);
+        bowSprint.visibleWhen(() -> bowMode.getValue() != MODE_NONE);
     }
 
     public static NoSlowModule instance() {
@@ -143,21 +144,6 @@ public final class NoSlowModule extends Module {
             return;
         }
         FloatManager.INSTANCE.setFloatState(isAnyActive(), FloatModules.NO_SLOW);
-    }
-
-    private void updateSettingVisibility() {
-        int sm = swordMode.getValue();
-        swordMotion.setVisible(sm == MODE_VANILLA);
-        swordSprint.setVisible(sm != MODE_NONE);
-        killAuraOnly.setVisible(sm != MODE_NONE);
-
-        int fm = foodMode.getValue();
-        foodMotion.setVisible(fm == MODE_VANILLA);
-        foodSprint.setVisible(fm != MODE_NONE);
-
-        int bm = bowMode.getValue();
-        bowMotion.setVisible(bm == MODE_VANILLA);
-        bowSprint.setVisible(bm != MODE_NONE);
     }
 
     /**

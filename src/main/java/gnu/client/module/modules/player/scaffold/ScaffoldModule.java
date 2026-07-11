@@ -214,6 +214,69 @@ public final class ScaffoldModule extends Module implements PacketListener, IMin
   public ScaffoldModule() {
     super("Scaffold", "LiquidBounce-parity scaffold", Category.PLAYER);
     multiPlace.setVisible(false);
+
+    expandLength.visibleWhen(() -> technique.getValue() == TECH_EXPAND);
+    godBridgeLedge.visibleWhen(() -> technique.getValue() == TECH_GODBRIDGE);
+    godBridgeForceSneak.visibleWhen(() -> technique.getValue() == TECH_GODBRIDGE);
+    breezilyEdgeStrafe.visibleWhen(() -> technique.getValue() == TECH_BREEZILY);
+    breezilyEdgeMin.visibleWhen(() -> technique.getValue() == TECH_BREEZILY && breezilyEdgeStrafe.getValue());
+    breezilyEdgeMax.visibleWhen(() -> technique.getValue() == TECH_BREEZILY && breezilyEdgeStrafe.getValue());
+
+    towerMotion.visibleWhen(() -> tower.getValue() == ScaffoldTowers.MOTION);
+    towerTriggerHeight.visibleWhen(() -> tower.getValue() == ScaffoldTowers.MOTION);
+    towerSlow.visibleWhen(() -> tower.getValue() == ScaffoldTowers.MOTION);
+    towerPulldownTrigger.visibleWhen(() -> tower.getValue() == ScaffoldTowers.PULLDOWN);
+    towerKarhuTimer.visibleWhen(() -> tower.getValue() == ScaffoldTowers.KARHU);
+    towerKarhuTrigger.visibleWhen(() -> tower.getValue() == ScaffoldTowers.KARHU);
+    towerKarhuPulldown.visibleWhen(() -> tower.getValue() == ScaffoldTowers.KARHU);
+
+    sigmoidSteepness.visibleWhen(() -> angleSmooth.getValue() == ScaffoldAngleSmooth.SIGMOID
+        || (angleSmooth.getValue() == ScaffoldAngleSmooth.ACCELERATION && accelSigmoidDecel.getValue()));
+    sigmoidMidpoint.visibleWhen(() -> angleSmooth.getValue() == ScaffoldAngleSmooth.SIGMOID
+        || (angleSmooth.getValue() == ScaffoldAngleSmooth.ACCELERATION && accelSigmoidDecel.getValue()));
+    yawAccelerationMin.visibleWhen(() -> angleSmooth.getValue() == ScaffoldAngleSmooth.ACCELERATION);
+    yawAccelerationMax.visibleWhen(() -> angleSmooth.getValue() == ScaffoldAngleSmooth.ACCELERATION);
+    pitchAccelerationMin.visibleWhen(() -> angleSmooth.getValue() == ScaffoldAngleSmooth.ACCELERATION);
+    pitchAccelerationMax.visibleWhen(() -> angleSmooth.getValue() == ScaffoldAngleSmooth.ACCELERATION);
+    accelerationError.visibleWhen(() -> angleSmooth.getValue() == ScaffoldAngleSmooth.ACCELERATION);
+    constantError.visibleWhen(() -> angleSmooth.getValue() == ScaffoldAngleSmooth.ACCELERATION);
+    accelSigmoidDecel.visibleWhen(() -> angleSmooth.getValue() == ScaffoldAngleSmooth.ACCELERATION);
+    dynamicAccel.visibleWhen(() -> angleSmooth.getValue() == ScaffoldAngleSmooth.ACCELERATION);
+    yawAccelError.visibleWhen(() -> angleSmooth.getValue() == ScaffoldAngleSmooth.ACCELERATION
+        && accelerationError.getValue());
+    pitchAccelError.visibleWhen(() -> angleSmooth.getValue() == ScaffoldAngleSmooth.ACCELERATION
+        && accelerationError.getValue());
+    yawConstantError.visibleWhen(() -> angleSmooth.getValue() == ScaffoldAngleSmooth.ACCELERATION
+        && constantError.getValue());
+    pitchConstantError.visibleWhen(() -> angleSmooth.getValue() == ScaffoldAngleSmooth.ACCELERATION
+        && constantError.getValue());
+    coefDistance.visibleWhen(() -> angleSmooth.getValue() == ScaffoldAngleSmooth.ACCELERATION
+        && dynamicAccel.getValue());
+
+    simulateFailedOnly.visibleWhen(() -> simulatePlacement.getValue());
+    autoBlockAlways.visibleWhen(() -> autoBlock.getValue());
+    autoBlockMinCount.visibleWhen(() -> autoBlock.getValue());
+    predictionCutoff.visibleWhen(() -> prediction.getValue());
+    predictionWarmup.visibleWhen(() -> prediction.getValue());
+    predictionBootstrap.visibleWhen(() -> prediction.getValue());
+    ledgeEdge.visibleWhen(() -> ledge.getValue());
+    accelMult.visibleWhen(() -> acceleration.getValue());
+    strafeSpeed.visibleWhen(() -> strafe.getValue());
+    speedLimit.visibleWhen(() -> speedLimiter.getValue());
+    eagleBlocksMin.visibleWhen(() -> eagle.getValue());
+    eagleBlocksMax.visibleWhen(() -> eagle.getValue());
+    eagleEdgeMin.visibleWhen(() -> eagle.getValue());
+    eagleEdgeMax.visibleWhen(() -> eagle.getValue());
+    eagleOnlyGround.visibleWhen(() -> eagle.getValue());
+    tellyReset.visibleWhen(() -> telly.getValue());
+    tellyStraight.visibleWhen(() -> telly.getValue());
+    tellyJump.visibleWhen(() -> telly.getValue());
+    tellyAimOnTower.visibleWhen(() -> telly.getValue());
+    blinkTimeMin.visibleWhen(() -> scaffoldBlink.getValue());
+    blinkTimeMax.visibleWhen(() -> scaffoldBlink.getValue());
+    blinkFlushPlace.visibleWhen(() -> scaffoldBlink.getValue());
+    blinkFlushTower.visibleWhen(() -> scaffoldBlink.getValue());
+    blinkFlushSneak.visibleWhen(() -> scaffoldBlink.getValue());
   }
 
   @Override

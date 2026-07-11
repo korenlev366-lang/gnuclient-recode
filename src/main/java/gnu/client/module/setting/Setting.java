@@ -2,11 +2,16 @@ package gnu.client.module.setting;
 
 import com.google.gson.JsonElement;
 
+import java.util.function.BooleanSupplier;
+
 public abstract class Setting<T> {
 
     private final String name;
     private T value;
+    /** Base flag — {@link #setVisible(boolean)} for always-hidden settings. */
     private boolean visible = true;
+    /** Optional live predicate (mode/bool gates). Evaluated every GUI frame. */
+    private BooleanSupplier visibilityCondition;
 
     protected Setting(String name, T value) {
         this.name = name;
@@ -25,14 +30,36 @@ public abstract class Setting<T> {
         this.value = value;
     }
 
-    /** Whether this setting should be shown in the GUI (Raven's guiUpdate pattern). */
+    /**
+     * Whether this setting should be shown in the GUI.
+     * Hidden when {@link #setVisible(boolean) setVisible(false)} or when a
+     * {@link #visibleWhen(BooleanSupplier)} predicate returns false.
+     */
     public boolean isVisible() {
-        return visible;
+        if (!visible)
+            return false;
+        return visibilityCondition == null || visibilityCondition.getAsBoolean();
     }
 
-    /** Set visibility — hidden settings are not rendered in the GUI. */
+    /**
+     * Force show/hide regardless of predicate. Prefer {@link #visibleWhen} for
+     * mode-tied settings so future modules stay declarative.
+     */
     public void setVisible(boolean visible) {
         this.visible = visible;
+    }
+
+    /**
+     * Show this setting only while {@code condition} is true (OpenMyau-style).
+     * Call from field initializers after the parent setting exists, e.g.
+     * {@code addSetting(new SliderSetting(...).visibleWhen(() -> mode.getValue() == 1))}.
+     *
+     * @return {@code this} for fluent use with {@code addSetting}
+     */
+    @SuppressWarnings("unchecked")
+    public final <S extends Setting<?>> S visibleWhen(BooleanSupplier condition) {
+        this.visibilityCondition = condition;
+        return (S) this;
     }
 
     public abstract JsonElement serialize();

@@ -27,6 +27,7 @@ public final class HudModule extends Module {
     public HudModule() {
         super("HUD", "Enabled module list and toggle notifications", Category.VISUALS);
         instance = this;
+        showSuffixes.visibleWhen(() -> showArray.getValue());
     }
 
     public static HudModule instance() {

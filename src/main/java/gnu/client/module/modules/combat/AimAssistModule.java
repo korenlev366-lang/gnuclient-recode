@@ -104,6 +104,16 @@ public final class AimAssistModule extends Module {
 
     public AimAssistModule() {
         super("Aim Assist", "Aims at players for you", Category.COMBAT);
+        multipointOffset.visibleWhen(() -> aimMode.getValue() == 1);
+        targetSwitchDelay.visibleWhen(() -> targetingMode.getValue() != 2);
+        fovColorR.visibleWhen(() -> visualizeFov.getValue());
+        fovColorG.visibleWhen(() -> visualizeFov.getValue());
+        fovColorB.visibleWhen(() -> visualizeFov.getValue());
+        targetLineColorR.visibleWhen(() -> targetLine.getValue());
+        targetLineColorG.visibleWhen(() -> targetLine.getValue());
+        targetLineColorB.visibleWhen(() -> targetLine.getValue());
+        targetLineThickness.visibleWhen(() -> targetLine.getValue());
+        hurtTime.visibleWhen(() -> hurtTimeFilter.getValue());
     }
 
     @Override

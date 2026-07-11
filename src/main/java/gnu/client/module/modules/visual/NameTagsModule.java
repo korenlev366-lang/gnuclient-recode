@@ -59,6 +59,7 @@ public final class NameTagsModule extends Module {
 
     public NameTagsModule() {
         super("NameTags", "Custom player nametags", Category.VISUALS);
+        scale.visibleWhen(() -> !autoScale.getValue());
     }
 
     @Override

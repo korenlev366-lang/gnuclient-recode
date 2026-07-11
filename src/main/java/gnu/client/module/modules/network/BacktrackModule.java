@@ -124,6 +124,41 @@ public final class BacktrackModule extends Module implements PacketListener {
 
     public BacktrackModule() {
         super("Back Track", "Hit players at their past position", Category.COMBAT);
+        distanceMin.visibleWhen(() -> useDistanceCheck.getValue());
+        distanceMax.visibleWhen(() -> useDistanceCheck.getValue());
+        renderServerRecord.visibleWhen(() -> enableVisuals.getValue());
+        renderMode.visibleWhen(() -> enableVisuals.getValue());
+        drawBox.visibleWhen(() -> enableVisuals.getValue());
+        drawOutline.visibleWhen(() -> enableVisuals.getValue());
+        drawFill.visibleWhen(() -> enableVisuals.getValue());
+        boxColorR.visibleWhen(() -> enableVisuals.getValue());
+        boxColorG.visibleWhen(() -> enableVisuals.getValue());
+        boxColorB.visibleWhen(() -> enableVisuals.getValue());
+        outlineColorR.visibleWhen(() -> enableVisuals.getValue());
+        outlineColorG.visibleWhen(() -> enableVisuals.getValue());
+        outlineColorB.visibleWhen(() -> enableVisuals.getValue());
+        lineWidth.visibleWhen(() -> enableVisuals.getValue());
+        outlineWidth.visibleWhen(() -> enableVisuals.getValue());
+        enableTrail.visibleWhen(() -> enableVisuals.getValue());
+        enablePulse.visibleWhen(() -> enableVisuals.getValue());
+        enableGlow.visibleWhen(() -> enableVisuals.getValue());
+        enableHurt.visibleWhen(() -> enableVisuals.getValue());
+        trailDuration.visibleWhen(() -> enableVisuals.getValue() && enableTrail.getValue());
+        maxTrailPoints.visibleWhen(() -> enableVisuals.getValue() && enableTrail.getValue());
+        trailColorR.visibleWhen(() -> enableVisuals.getValue() && enableTrail.getValue());
+        trailColorG.visibleWhen(() -> enableVisuals.getValue() && enableTrail.getValue());
+        trailColorB.visibleWhen(() -> enableVisuals.getValue() && enableTrail.getValue());
+        pulseSpeed.visibleWhen(() -> enableVisuals.getValue() && enablePulse.getValue());
+        pulseMinAlpha.visibleWhen(() -> enableVisuals.getValue() && enablePulse.getValue());
+        pulseMaxAlpha.visibleWhen(() -> enableVisuals.getValue() && enablePulse.getValue());
+        glowIntensity.visibleWhen(() -> enableVisuals.getValue() && enableGlow.getValue());
+        glowColorR.visibleWhen(() -> enableVisuals.getValue() && enableGlow.getValue());
+        glowColorG.visibleWhen(() -> enableVisuals.getValue() && enableGlow.getValue());
+        glowColorB.visibleWhen(() -> enableVisuals.getValue() && enableGlow.getValue());
+        hurtColorR.visibleWhen(() -> enableVisuals.getValue() && enableHurt.getValue());
+        hurtColorG.visibleWhen(() -> enableVisuals.getValue() && enableHurt.getValue());
+        hurtColorB.visibleWhen(() -> enableVisuals.getValue() && enableHurt.getValue());
+        hurtDuration.visibleWhen(() -> enableVisuals.getValue() && enableHurt.getValue());
     }
 
     public static void abortActiveLag() {

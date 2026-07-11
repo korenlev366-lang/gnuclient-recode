@@ -37,6 +37,11 @@ public final class BlinkModule extends Module implements PacketListener {
 
     public BlinkModule() {
         super("Blink", "Hold outbound packets (Raven); optional step release", Category.MISC);
+        espRed.visibleWhen(() -> serverEsp.getValue());
+        espGreen.visibleWhen(() -> serverEsp.getValue());
+        espBlue.visibleWhen(() -> serverEsp.getValue());
+        espFilled.visibleWhen(() -> serverEsp.getValue());
+        espLineWidth.visibleWhen(() -> serverEsp.getValue());
     }
 
     @Override

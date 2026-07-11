@@ -117,6 +117,7 @@ public final class HitSelectModule extends Module implements PacketListener {
     public HitSelectModule() {
         super("Hit Select", "Filters unnecessary clicks by managing attack timing per target",
                 Category.COMBAT);
+        onlyWhileDamaged.visibleWhen(() -> mode.getValue() == 1);
     }
 
     // ────────────────────────────────────────────────────────────────

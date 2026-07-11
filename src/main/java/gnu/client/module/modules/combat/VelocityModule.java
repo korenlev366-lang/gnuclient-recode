@@ -118,6 +118,20 @@ public final class VelocityModule extends Module implements PacketListener {
 
     public VelocityModule() {
         super("Velocity", "Reduces knockback from hits", Category.COMBAT);
+        horizontal.visibleWhen(() -> mode.getValue() == 0);
+        vertical.visibleWhen(() -> mode.getValue() == 0);
+        chance.visibleWhen(() -> mode.getValue() == 0);
+        jumpChance.visibleWhen(() -> mode.getValue() == 1 || mode.getValue() == 2);
+        minHorizontalKb.visibleWhen(() -> mode.getValue() == 1 || mode.getValue() == 2);
+        tickDelay.visibleWhen(() -> mode.getValue() == 1 || mode.getValue() == 2);
+        jumpHorizontal.visibleWhen(() -> mode.getValue() == 1 || mode.getValue() == 2);
+        sprintingOnly.visibleWhen(() -> mode.getValue() == 1 || mode.getValue() == 2);
+        disableInWater.visibleWhen(() -> mode.getValue() == 1 || mode.getValue() == 2);
+        disableOnHit.visibleWhen(() -> mode.getValue() == 1 || mode.getValue() == 2);
+        intaveFactor.visibleWhen(() -> mode.getValue() == 2);
+        intaveHurtMin.visibleWhen(() -> mode.getValue() == 2);
+        intaveHurtMax.visibleWhen(() -> mode.getValue() == 2);
+        intaveCooldownMs.visibleWhen(() -> mode.getValue() == 2);
     }
 
     // ────────────────────────────────────────────────────────────────
