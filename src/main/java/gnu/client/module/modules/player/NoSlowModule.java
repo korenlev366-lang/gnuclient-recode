@@ -11,7 +11,8 @@ import gnu.client.runtime.FloatManager;
 import gnu.client.runtime.FloatModules;
 import gnu.client.runtime.mc.Mc;
 import net.minecraft.client.entity.EntityPlayerSP;
-import net.minecraft.item.ItemFood;
+import net.minecraft.item.EnumAction;
+import net.minecraft.item.ItemPotion;
 import net.minecraft.item.ItemStack;
 
 import java.util.Arrays;
@@ -86,7 +87,7 @@ public final class NoSlowModule extends Module {
     }
 
     public boolean isBowActive() {
-        return bowMode.getValue() != MODE_NONE && Mc.isHoldingBow() && Mc.isUsingItem();
+        return bowMode.getValue() != MODE_NONE && Mc.isHoldingBow();
     }
 
     public boolean isAnyActive() {
@@ -106,7 +107,7 @@ public final class NoSlowModule extends Module {
             motionCounter.count++;
             return Math.round(swordMotion.getValue());
         }
-        if (isHoldingFood()) {
+        if (isEating()) {
             if (foodMode.getValue() == MODE_GRIM)
                 return grimMotionPercent(motionCounter);
             motionCounter.count++;
@@ -155,16 +156,32 @@ public final class NoSlowModule extends Module {
         bowSprint.setVisible(bm != MODE_NONE);
     }
 
-    /** Spec: ItemFood + isUsingItem. */
-    private static boolean isEating() {
-        return Mc.isUsingItem() && isHoldingFood();
-    }
-
-    private static boolean isHoldingFood() {
+    /**
+     * OpenMyau {@code ItemUtil.isEating} — EAT/DRINK use action, splash potions excluded.
+     * Does not require {@code isUsingItem} (gated by {@link #isAnyActive}).
+     */
+    static boolean isEating() {
         EntityPlayerSP player = Mc.player();
         if (player == null)
             return false;
-        ItemStack stack = player.getHeldItem();
-        return stack != null && stack.getItem() instanceof ItemFood;
+        return isEatingStack(player.getHeldItem());
+    }
+
+    /** OpenMyau eating check on a held stack (no using-item gate). */
+    public static boolean isEatingStack(ItemStack itemStack) {
+        if (itemStack == null)
+            return false;
+        boolean splash = ItemPotion.isSplash(itemStack.getItem().getMetadata(itemStack));
+        return matchesEatingUseAction(itemStack.getItemUseAction(), splash);
+    }
+
+    /**
+     * Pure OpenMyau eating predicate for unit tests.
+     * Splash potions never count; otherwise EAT or DRINK.
+     */
+    public static boolean matchesEatingUseAction(EnumAction action, boolean splashPotion) {
+        if (splashPotion)
+            return false;
+        return action == EnumAction.EAT || action == EnumAction.DRINK;
     }
 }
