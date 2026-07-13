@@ -55,13 +55,54 @@ public final class BlinkManager implements PacketListener {
         if (blinkModule != module)
             return false;
         blinking = false;
+        blinkModule = BlinkModules.NONE;
+        // Collapse duplicate sprint/sneak C0Bs between flying packets before release —
+        // AUTO_BLOCK flush uses fast-track and would bypass AuraCombatPacketGuard
+        // (Grim BadPacketsX).
+        collapseEntityActionsForFlush();
         while (!blinkedPackets.isEmpty()) {
             Object p = blinkedPackets.poll();
             if (p != null)
                 flushSender.accept(p);
         }
-        blinkModule = BlinkModules.NONE;
         return true;
+    }
+
+    /**
+     * At most one sprint and one sneak C0B between movement packets in the blink deque
+     * (same rule as Grim BadPacketsX / {@link AuraCombatPacketGuard}).
+     */
+    private void collapseEntityActionsForFlush() {
+        if (blinkedPackets.isEmpty())
+            return;
+        Deque<Object> out = new ArrayDeque<>();
+        boolean sprintSinceMove = false;
+        boolean sneakSinceMove = false;
+        for (Object p : blinkedPackets) {
+            if (PacketHelper.isPlayerMovement(p)) {
+                sprintSinceMove = false;
+                sneakSinceMove = false;
+                out.offer(p);
+                continue;
+            }
+            if (PacketHelper.isSprintEntityAction(p)) {
+                if (!sprintSinceMove) {
+                    out.offer(p);
+                    sprintSinceMove = true;
+                }
+                continue;
+            }
+            if (PacketHelper.isSneakEntityAction(p)) {
+                if (!sneakSinceMove) {
+                    out.offer(p);
+                    sneakSinceMove = true;
+                }
+                continue;
+            }
+            out.offer(p);
+        }
+        blinkedPackets.clear();
+        blinkedPackets.addAll(out);
     }
 
     public BlinkModules getBlinkingModule() {

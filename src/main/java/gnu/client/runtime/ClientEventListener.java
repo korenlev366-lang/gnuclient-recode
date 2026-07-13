@@ -4,15 +4,15 @@ import gnu.client.config.ConfigManager;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.event.JumpEvent;
+import gnu.client.event.PreAttackEvent;
+import gnu.client.event.RightClickMouseEvent;
 import gnu.client.event.StrafeEvent;
 import gnu.client.module.modules.combat.AntiBotModule;
 import gnu.client.module.modules.combat.DisplaceModule;
+import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.module.modules.combat.RavenAntiBot;
 import gnu.client.module.modules.combat.ReachModule;
-import gnu.client.module.modules.combat.MoreKBModule;
-import gnu.client.module.modules.combat.WTapModule;
-import gnu.client.module.modules.network.BacktrackModule;
 import gnu.client.module.modules.network.LagrangeModule;
 import gnu.client.common.GnuLog;
 import gnu.client.runtime.mc.Mc;
@@ -117,6 +117,18 @@ public final class ClientEventListener {
         event.setCanceled(true);
     }
 
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void onPreAttack(PreAttackEvent event) {
+        if (KillAuraModule.shouldCancelVanillaClick())
+            event.setCanceled(true);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void onRightClickMouse(RightClickMouseEvent event) {
+        if (KillAuraModule.shouldCancelVanillaClick())
+            event.setCanceled(true);
+    }
+
     @SubscribeEvent
     public void onStrafe(StrafeEvent event) {
         VelocityModule.patchStrafe(event);
@@ -132,17 +144,8 @@ public final class ClientEventListener {
     public void onAttackEntity(AttackEntityEvent event) {
         if (!Mc.isInGame())
             return;
-        Module backtrack = ModuleManager.INSTANCE.getModule("Back Track");
-        if (backtrack instanceof BacktrackModule && backtrack.isEnabled())
-            ((BacktrackModule) backtrack).noteForgeAttack(event.target);
-
-        Module wTap = ModuleManager.INSTANCE.getModule("W Tap");
-        if (wTap instanceof WTapModule && wTap.isEnabled())
-            ((WTapModule) wTap).noteForgeAttack(event.target);
-
-        Module moreKb = ModuleManager.INSTANCE.getModule("MoreKB");
-        if (moreKb instanceof MoreKBModule && moreKb.isEnabled())
-            ((MoreKBModule) moreKb).noteForgeAttack(event.target);
+        // Single notify path — CombatAttackNotify dedupes vs KillAura noteAttack.
+        CombatAttackNotify.onForgeAttack(event.target);
 
         Module lagrange = ModuleManager.INSTANCE.getModule("Lagrange");
         if (lagrange instanceof LagrangeModule && lagrange.isEnabled())

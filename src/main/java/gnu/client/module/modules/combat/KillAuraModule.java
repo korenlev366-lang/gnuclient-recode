@@ -101,7 +101,7 @@ public final class KillAuraModule extends Module {
 
     private final SliderSetting minCps = addSetting(new SliderSetting("MinCPS", 10.0f, 1.0f, 20.0f));
     private final SliderSetting maxCps = addSetting(new SliderSetting("MaxCPS", 14.0f, 1.0f, 20.0f));
-    private final SliderSetting attackRange = addSetting(new SliderSetting("AttackRange", 3.2f, 2.0f, 6.0f));
+    private final SliderSetting attackRange = addSetting(new SliderSetting("AttackRange", 3.0f, 2.0f, 6.0f));
     private final SliderSetting swingRange = addSetting(new SliderSetting("SwingRange", 3.6f, 2.0f, 6.0f));
     private final SliderSetting fov = addSetting(new SliderSetting("FOV", 180.0f, 15.0f, 360.0f));
     private final SliderSetting switchDelayMs = addSetting(new SliderSetting("SwitchDelay", 150.0f, 0.0f, 1000.0f));
@@ -202,6 +202,19 @@ public final class KillAuraModule extends Module {
         if (!(module instanceof KillAuraModule) || !module.isEnabled())
             return null;
         return ((KillAuraModule) module).attackTarget;
+    }
+
+    /**
+     * OpenMyau {@code onLeftClick}/{@code onRightClick}: cancel vanilla mouse while KA
+     * has a target or is auto-blocking so a second C02 cannot land on entityMouseOver
+     * in the same flying window (Grim MultiInteractA).
+     */
+    public static boolean shouldCancelVanillaClick() {
+        Module module = ModuleManager.instance().getModule("KillAura");
+        if (!(module instanceof KillAuraModule) || !module.isEnabled())
+            return false;
+        KillAuraModule ka = (KillAuraModule) module;
+        return ka.attackTarget != null || ka.autoBlockHelper.isBlockingSession();
     }
 
     public static void onPreUpdate(Object player) {
@@ -609,7 +622,7 @@ public final class KillAuraModule extends Module {
      * OpenMyau soft {@code canAttack()} for autoblock Context only.
      * Range / look-hit / HitSelect / RELEASE-order stay in {@link #canAttackThisTick}.
      */
-    private boolean isAttackEligible(EntityPlayerSP player) {
+    boolean isAttackEligible(EntityPlayerSP player) {
         if (player == null || attackTarget == null || !canRunCombat())
             return false;
         if (requirePress.getValue() && !Mc.isPhysicalLmbDown())
@@ -645,14 +658,8 @@ public final class KillAuraModule extends Module {
         if (now - lastAttackMs < delayMs)
             return false;
 
-        double distSq = RavenRotationUtils.distanceSqFromEyeToClosestOnAabb(attackTarget);
-        double range = attackRange.getValue();
-        if (distSq > range * range)
-            return false;
-
-        // Grim Hitboxes: look ray (yaw/pitch Grim has for this C02) must hit the box.
-        // Silent uses pending/sent look; Legit/LockView use camera. Skip for ROT_NONE.
-        if (rotations.getValue() != ROT_NONE && !lookHitsAttackTarget(player, range))
+        // AttackRange: look-ray must hit box with the look Grim will use on next flying.
+        if (!lookHitsAttackTarget(player, attackRange.getValue()))
             return false;
 
         if (HitSelectModule.shouldBlockClick())
@@ -661,22 +668,32 @@ public final class KillAuraModule extends Module {
     }
 
     /**
-     * OpenMyau Silent/Legit gate: do not attack until the attack look ray intersects
-     * the target AABB (avoids Grim Hitboxes when rotations are still stepping).
+     * Grim 1.8 Hitboxes/Reach evaluates queued C02 against the <b>next</b> C03 look:
+     * {@code (yaw,pitch)} and {@code (lastYaw, pitch)} — never attack on a look that
+     * will not be on that C03.
+     *
+     * <p>Silent: require {@code pendingSent*} (this tick's C03 override). Pass if that
+     * look hits, or Grim's mix {@code (lastYaw, pendingPitch)} hits. If MoveFix NONE
+     * cleared pending, refuse attack (camera C03 would miss).
+     *
+     * <p>Other modes: C03 is camera — require camera look-on-box (Reach-style).
      */
     private boolean lookHitsAttackTarget(EntityPlayerSP player, double range) {
         if (attackTarget == null || player == null)
             return false;
-        float yaw;
-        float pitch;
-        if (rotations.getValue() == ROT_SILENT && pendingSentYaw != Float.MIN_VALUE) {
-            yaw = pendingSentYaw;
-            pitch = pendingSentPitch;
-        } else {
-            yaw = player.rotationYaw;
-            pitch = player.rotationPitch;
+        if (rotations.getValue() == ROT_SILENT) {
+            if (pendingSentYaw == Float.MIN_VALUE)
+                return false;
+            if (RavenRotationUtils.looksAtHitbox(
+                    attackTarget, pendingSentYaw, pendingSentPitch, range))
+                return true;
+            // Grim also accepts (lastYaw, currentPitch) after this C03 applies pending pitch.
+            float lastYaw = PlayerUpdateHook.lastReportedYaw(player);
+            return RavenRotationUtils.looksAtHitbox(
+                    attackTarget, lastYaw, pendingSentPitch, range);
         }
-        return RavenRotationUtils.looksAtHitbox(attackTarget, yaw, pitch, range);
+        return RavenRotationUtils.looksAtHitbox(
+                attackTarget, player.rotationYaw, player.rotationPitch, range);
     }
 
     private long getAttackDelayMs() {

@@ -9,17 +9,40 @@ import gnu.client.module.modules.network.BacktrackModule;
 import gnu.client.runtime.mc.Mc;
 import net.minecraft.entity.Entity;
 
-/** Forge attack notification helper — dispatches attack/swing events to combat modules. */
+/**
+ * Forge attack notification helper — dispatches attack/swing events to combat modules.
+ *
+ * <p>KillAura calls {@link #noteAttack} before {@code Mc.attackEntity}, which also fires
+ * Forge {@code AttackEntityEvent}. {@link #onForgeAttack} skips a duplicate notify for
+ * that same attack so WTap/MoreKB do not inject two sprint C0B bursts (BadPacketsX).
+ */
 public final class CombatAttackNotify {
 
     private static boolean prevPhysicalLmb;
+    /** Set by {@link #noteAttack}; consumed by {@link #onForgeAttack}. */
+    private static boolean skipNextForgeDuplicate;
 
     private CombatAttackNotify() {}
 
     public static void noteAttack(Object target) {
         if (!Mc.isInGame() || target == null)
             return;
+        dispatch(target);
+        skipNextForgeDuplicate = true;
+    }
 
+    /** From Forge {@code AttackEntityEvent} — skips if KillAura already notified. */
+    public static void onForgeAttack(Object target) {
+        if (skipNextForgeDuplicate) {
+            skipNextForgeDuplicate = false;
+            return;
+        }
+        if (!Mc.isInGame() || target == null)
+            return;
+        dispatch(target);
+    }
+
+    private static void dispatch(Object target) {
         Module backtrack = ModuleManager.INSTANCE.getModule("Back Track");
         if (backtrack instanceof BacktrackModule && backtrack.isEnabled())
             ((BacktrackModule) backtrack).noteForgeAttack(target);

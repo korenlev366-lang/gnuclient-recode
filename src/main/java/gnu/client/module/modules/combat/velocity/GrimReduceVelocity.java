@@ -1,5 +1,6 @@
 package gnu.client.module.modules.combat.velocity;
 
+import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.runtime.mc.Mc;
 import gnu.client.utility.PacketUtils;
@@ -33,9 +34,13 @@ public final class GrimReduceVelocity extends VelocityMode {
             return false;
 
         Entity target = getClosestEntity();
-        if (target != null) {
-            PacketUtils.sendPacketNoEvent(new C02PacketUseEntity(target, C02PacketUseEntity.Action.ATTACK));
-        }
+        if (target == null)
+            return false;
+        // MultiInteractA: do not inject a second ATTACK while KillAura already owns a target
+        // in this flying window (often a different entity than KA's Switch target).
+        if (KillAuraModule.getCurrentTarget() != null)
+            return false;
+        PacketUtils.sendPacketNoEvent(new C02PacketUseEntity(target, C02PacketUseEntity.Action.ATTACK));
         return false;
     }
 
