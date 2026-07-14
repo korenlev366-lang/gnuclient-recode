@@ -162,7 +162,7 @@ public final class ScriptManager {
         // 4. Re-run ConfigManager.load() so saved script settings are applied.
         //    The loading=true guard in ConfigManager prevents re-save during this pass.
         try {
-            ConfigManager.INSTANCE.load();
+            ConfigManager.instance().load();
         } catch (Throwable t) {
             GnuLog.log("JAVA_ post-script ConfigManager.load failed: " + t);
         }

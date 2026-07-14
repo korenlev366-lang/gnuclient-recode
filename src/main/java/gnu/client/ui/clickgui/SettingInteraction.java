@@ -105,7 +105,7 @@ public final class SettingInteraction {
         pct = UiKit.clamp01(pct);
         float val = dragging.getMin() + pct * (dragging.getMax() - dragging.getMin());
         dragging.setValue(val);
-        ConfigManager.INSTANCE.requestSave();
+        ConfigManager.instance().requestSave();
     }
 
     public void mouseReleased() {
@@ -121,7 +121,7 @@ public final class SettingInteraction {
             BoolSetting bool = (BoolSetting) setting;
             bool.setValue(!bool.getValue());
             module.guiUpdate();
-            ConfigManager.INSTANCE.requestSave();
+            ConfigManager.instance().requestSave();
             return true;
         }
         if (setting instanceof ModeSetting) {
@@ -141,7 +141,7 @@ public final class SettingInteraction {
                 }
             }
             module.guiUpdate();
-            ConfigManager.INSTANCE.requestSave();
+            ConfigManager.instance().requestSave();
             return true;
         }
         if (setting instanceof SliderSetting) {
@@ -156,7 +156,7 @@ public final class SettingInteraction {
             pct = UiKit.clamp01(pct);
             float val = slider.getMin() + pct * (slider.getMax() - slider.getMin());
             slider.setValue(val);
-            ConfigManager.INSTANCE.requestSave();
+            ConfigManager.instance().requestSave();
             return true;
         }
         return true;

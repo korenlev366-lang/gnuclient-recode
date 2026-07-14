@@ -31,15 +31,25 @@ public final class ChatCommandHandler implements PacketListener {
         if (!PacketHelper.isChatSend(packet))
             return false;
         String message = PacketHelper.chatMessage(packet);
-        if (message == null || !BindCommand.handles(message))
+        if (message == null)
             return false;
 
-        String result = BindCommand.execute(message);
+        if (ConfigCommand.handles(message))
+            return addChat(ConfigCommand.execute(message));
+        if (HelpCommand.handles(message))
+            return addChat(HelpCommand.execute(message));
+        if (!BindCommand.handles(message))
+            return false;
+
+        return addChat(BindCommand.execute(message));
+    }
+
+    private static boolean addChat(String result) {
         if (result != null) {
             GnuLog.log("CMD_ " + result);
             Mc.addChatMessage("§7[GNU] §f" + result);
         }
-        return true; // cancel outbound chat packet
+        return result != null;
     }
 
     @Override

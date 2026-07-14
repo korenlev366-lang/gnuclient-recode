@@ -388,9 +388,9 @@ public final class CategoryColumn {
     }
 
     private void persistLayoutNow() {
-        ClickGuiLayout layout = ConfigManager.INSTANCE.getClickGuiLayout();
+        ClickGuiLayout layout = ConfigManager.instance().getClickGuiLayout();
         persistTo(layout);
-        ConfigManager.INSTANCE.setClickGuiLayout(layout);
+        ConfigManager.instance().setClickGuiLayout(layout);
     }
 
     private static boolean matchesSearch(ModuleRow row, String search) {

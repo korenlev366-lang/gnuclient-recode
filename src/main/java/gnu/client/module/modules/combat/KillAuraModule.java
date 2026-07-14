@@ -338,6 +338,8 @@ public final class KillAuraModule extends Module {
         ctx.hasValidTarget = hasValidTargetInAutoBlockRange(sp);
         ctx.attackEligible = isAttackEligible(sp);
         ctx.canAutoBlock = canAutoBlock();
+        ctx.manualUseKeyDown = Mc.isPhysicalRmbDown() || Mc.isUseItemKeyDown();
+        ctx.requirePress = autoBlockRequirePress.getValue();
         ctx.attackDelayMs = remainingDelay;
         ctx.yaw = aimYaw;
         ctx.pitch = aimPitch;

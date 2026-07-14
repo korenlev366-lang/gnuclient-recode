@@ -166,6 +166,19 @@ public final class ScaffoldMath implements IMinecraftInstance {
     return baseYaw + wrapAngle(desiredYaw - baseYaw);
   }
 
+  /**
+   * Keep an equivalent yaw outside Grim's small-absolute-yaw + large-raw-delta window.
+   */
+  public static float avoidAimModulo360(float yaw, float lastReportedYaw) {
+    float rawDelta = yaw - lastReportedYaw;
+    if (Math.abs(rawDelta) <= 320.0f || Math.abs(yaw) >= 360.0f)
+      return yaw;
+
+    float plus = yaw + 360.0f;
+    float minus = yaw - 360.0f;
+    return Math.abs(minus - lastReportedYaw) < Math.abs(plus - lastReportedYaw) ? minus : plus;
+  }
+
   public static float clampPitch(float pitch) {
     return MathHelper.clamp_float(pitch, -90.0f, 90.0f);
   }

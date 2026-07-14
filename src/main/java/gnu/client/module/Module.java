@@ -140,10 +140,18 @@ public abstract class Module {
     }
 
     public void deserialize(JsonObject root) {
+        deserialize(root, true);
+    }
+
+    public void deserialize(JsonObject root, boolean restoreKeyCode) {
         if (root.has("enabled"))
             setEnabled(root.get("enabled").getAsBoolean());
-        if (root.has("keyCode"))
+        if (restoreKeyCode && root.has("keyCode"))
             keyCode = root.get("keyCode").getAsInt();
+        deserializeSettings(root);
+    }
+
+    public void deserializeSettings(JsonObject root) {
         if (root.has("settings")) {
             JsonObject settingsJson = root.getAsJsonObject("settings");
             for (Setting<?> s : settings) {

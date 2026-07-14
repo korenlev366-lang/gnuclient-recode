@@ -32,6 +32,7 @@ import gnu.client.module.modules.player.NoSlowModule;
 import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.module.impl.client.Settings;
 import gnu.client.module.modules.settings.ClickGuiModule;
+import gnu.client.module.modules.settings.ConfigManagerModule;
 import gnu.client.module.modules.visual.BedEspModule;
 import gnu.client.module.modules.visual.EspModule;
 import gnu.client.module.modules.visual.FreeLookModule;
@@ -57,7 +58,7 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
 public class GnuClientMod {
 
     public static final String MOD_ID = "gnuclient";
-    public static final String VERSION = "1.0.0";
+    public static final String VERSION = "1.5.0";
 
     public static GnuClientMod instance;
     public static ModuleManager moduleManager;
@@ -71,7 +72,7 @@ public class GnuClientMod {
 
     @Mod.EventHandler
     public void init(FMLInitializationEvent event) {
-        Runtime.getRuntime().addShutdownHook(new Thread(ConfigManager.INSTANCE::flush));
+        Runtime.getRuntime().addShutdownHook(new Thread(ConfigManager.instance()::flush));
 
         MinecraftForge.EVENT_BUS.register(this);
         MinecraftForge.EVENT_BUS.register(new ClientEventListener());
@@ -85,7 +86,7 @@ public class GnuClientMod {
 
         registerModules();
         ConfigManager.setLoading(false);
-        ConfigManager.INSTANCE.load();
+        ConfigManager.instance().load();
         ScriptManager.instance().reloadAll();
         ChatCommandHandler.register();
 
@@ -100,6 +101,7 @@ public class GnuClientMod {
         moduleManager.init();
         safeRegister(new Settings());
         safeRegister(new ClickGuiModule());
+        safeRegister(new ConfigManagerModule());
         safeRegister(new WTapModule());
         safeRegister(new MoreKBModule());
         safeRegister(new SprintModule());

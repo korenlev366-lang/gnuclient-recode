@@ -55,6 +55,10 @@ public final class KillAuraAutoBlock {
         public boolean attackEligible;
         /** Sword held and optional use-key press. */
         public boolean canAutoBlock;
+        /** User is physically holding RMB/use item; used to avoid fighting manual block. */
+        public boolean manualUseKeyDown;
+        /** KillAura AutoBlockRequirePress setting. */
+        public boolean requirePress;
         public long attackDelayMs;
         public float yaw;
         public float pitch;
@@ -98,6 +102,20 @@ public final class KillAuraAutoBlock {
      * Call each KA preUpdate when KA has combat context (enabled / target path).
      * Mirrors OpenMyau PRE auto-block switch; does not perform the attack itself.
      */
+    /**
+     * When AutoBlockRequirePress is off, KillAura may auto-block without the user
+     * holding RMB. If the user then manually holds block, do not auto-release it
+     * just because the attack tick ended; that creates Grim PacketOrderI release
+     * failures while the client/server still has rightClicking=true.
+     */
+    static boolean shouldKeepBlockingForManualUse(Context ctx) {
+        return ctx != null
+            && ctx.mode != NONE
+            && ctx.canAutoBlock
+            && !ctx.requirePress
+            && ctx.manualUseKeyDown;
+    }
+
     public TickResult tick(Context ctx) {
         TickResult result = new TickResult();
         if (ctx == null) {
@@ -108,10 +126,19 @@ public final class KillAuraAutoBlock {
         boolean attack = ctx.attackEligible;
         boolean block = attack && ctx.canAutoBlock;
         if (!block) {
-            setAutoBlockBlink(false);
-            isBlocking = false;
-            fakeBlockState = false;
-            blockTick = 0;
+            if (shouldKeepBlockingForManualUse(ctx)) {
+                setAutoBlockBlink(false);
+                isBlocking = true;
+                fakeBlockState = false;
+                blockTick = 0;
+            } else {
+                setAutoBlockBlink(false);
+                isBlocking = false;
+                fakeBlockState = false;
+                blockTick = 0;
+                if (blockingState || isPlayerBlocking())
+                    stopBlock();
+            }
         }
         result.attackAllowed = attack;
         result.swap = false;

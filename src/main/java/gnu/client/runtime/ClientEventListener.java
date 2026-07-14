@@ -14,6 +14,7 @@ import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.module.modules.combat.RavenAntiBot;
 import gnu.client.module.modules.combat.ReachModule;
 import gnu.client.module.modules.network.LagrangeModule;
+import gnu.client.module.modules.settings.ConfigManagerModule;
 import gnu.client.common.GnuLog;
 import gnu.client.runtime.mc.Mc;
 import gnu.client.script.ScriptManager;
@@ -58,7 +59,8 @@ public final class ClientEventListener {
         if (event.phase != TickEvent.Phase.END)
             return;
         ModuleManager.INSTANCE.tick();
-        ConfigManager.INSTANCE.flushIfDue();
+        if (ConfigManagerModule.isAutoSaveEnabled())
+            ConfigManager.instance().flushIfDue();
     }
 
     /**

@@ -470,12 +470,13 @@ public final class ScaffoldModule extends Module implements PacketListener, IMin
             }
           }
           if (useYaw != Float.MIN_VALUE) {
+            useYaw = safeSentYaw(player, useYaw);
             // Telly: keep movement yaw if pitch-only still rays after move (sprint heading).
             if (telly.getValue() && !wasTowerJump) {
               float moveYaw = ScaffoldMath.quantize(MoveFixUtil.movementFacingYaw());
               if (ScaffoldMath.findPlacementHit(player, live.interactedBlockPos, live.faceOrdinal,
                   moveYaw, usePitch) != null) {
-                useYaw = moveYaw;
+                useYaw = safeSentYaw(player, moveYaw);
               }
             }
             // ON_TICK / ON_TICK_SNAP: snap to place look now (no pre-aim in runCycle).
@@ -490,9 +491,11 @@ public final class ScaffoldModule extends Module implements PacketListener, IMin
                 float moveYaw = ScaffoldMath.quantize(MoveFixUtil.movementFacingYaw());
                 if (ScaffoldMath.findPlacementHit(player, live.interactedBlockPos, live.faceOrdinal,
                     moveYaw, usePitch) != null)
-                  useYaw = moveYaw;
+                  useYaw = safeSentYaw(player, moveYaw);
               }
+              useYaw = safeSentYaw(player, useYaw);
             }
+            useYaw = safeSentYaw(player, useYaw);
             lastSentYaw = useYaw;
             lastSentPitch = usePitch;
             tickRotDeltaYaw = Math.abs(ScaffoldMath.wrapAngle(
@@ -544,6 +547,7 @@ public final class ScaffoldModule extends Module implements PacketListener, IMin
     pendingSimTarget = null;
 
     if (placeLockedYaw != Float.MIN_VALUE && placeLockedPitch != Float.MIN_VALUE) {
+      placeLockedYaw = safeSentYaw(player, placeLockedYaw);
       int mf = moveFix.getValue();
       if (ScaffoldMoveFix.writesCamera(mf)) {
         player.rotationYaw = placeLockedYaw;
@@ -586,6 +590,7 @@ public final class ScaffoldModule extends Module implements PacketListener, IMin
     int timingEarly = rotationTiming.getValue();
     if (timingEarly == TIMING_ON_TICK_SNAP
         && placeLockedYaw != Float.MIN_VALUE && placeLockedPitch != Float.MIN_VALUE) {
+      placeLockedYaw = safeSentYaw(player, placeLockedYaw);
       lastSentYaw = placeLockedYaw;
       lastSentPitch = placeLockedPitch;
       int mf = moveFix.getValue();
@@ -694,12 +699,14 @@ public final class ScaffoldModule extends Module implements PacketListener, IMin
       // ON_TICK: do not hold pre-aim.
       if (timing == TIMING_NORMAL
           && lastSentYaw != Float.MIN_VALUE && lastSentPitch != Float.MIN_VALUE) {
+        float safeYaw = safeSentYaw(player, lastSentYaw);
+        lastSentYaw = safeYaw;
         int mf = moveFix.getValue();
         if (ScaffoldMoveFix.writesCamera(mf)) {
-          player.rotationYaw = lastSentYaw;
+          player.rotationYaw = safeYaw;
           player.rotationPitch = lastSentPitch;
         } else {
-          armSilentLook(player, lastSentYaw, lastSentPitch);
+          armSilentLook(player, safeYaw, lastSentPitch);
         }
       }
     }
@@ -944,6 +951,7 @@ public final class ScaffoldModule extends Module implements PacketListener, IMin
       sentYaw = stepped[0];
       sentPitch = stepped[1];
     }
+    sentYaw = safeSentYaw(player, sentYaw);
 
     int mf = moveFix.getValue();
     if (ScaffoldMoveFix.writesCamera(mf)) {
@@ -972,12 +980,17 @@ public final class ScaffoldModule extends Module implements PacketListener, IMin
         sentYaw, sentPitch) != null;
   }
 
+  private float safeSentYaw(EntityPlayerSP player, float yaw) {
+    return ScaffoldMath.avoidAimModulo360(yaw, PlayerUpdateHook.lastReportedYaw(player));
+  }
+
   /**
    * Exact KillAura {@code sendSilentRotation} contract:
    * requestRotation + {@code pervYaw = sentYaw} when MoveFix on, else {@code Mc.getYaw()};
    * priority 3 when on, {@code -1} when render-only (same as KA).
    */
   private void armSilentLook(EntityPlayerSP player, float yaw, float pitch) {
+    yaw = safeSentYaw(player, yaw);
     PlayerUpdateHook.requestRotation(yaw, pitch);
     int mf = moveFix.getValue();
     boolean moveFixOn = ScaffoldMoveFix.armsPhysics(mf);
@@ -1027,6 +1040,7 @@ public final class ScaffoldModule extends Module implements PacketListener, IMin
       return;
     float yaw = lastSentYaw != Float.MIN_VALUE ? lastSentYaw : ScaffoldMath.quantize(target.yaw);
     float pitch = lastSentPitch != Float.MIN_VALUE ? lastSentPitch : ScaffoldMath.quantize(target.pitch);
+    yaw = safeSentYaw(player, yaw);
     Vec3 hit = ScaffoldMath.findPlacementHit(player, target.interactedBlockPos, target.faceOrdinal,
         yaw, pitch);
     if (hit == null)
@@ -1113,6 +1127,7 @@ public final class ScaffoldModule extends Module implements PacketListener, IMin
       pitch = n[1];
     }
     int mf = moveFix.getValue();
+    yaw = safeSentYaw(player, yaw);
     if (ScaffoldMoveFix.writesCamera(mf)) {
       player.rotationYaw = yaw;
       player.rotationPitch = pitch;
@@ -1145,7 +1160,7 @@ public final class ScaffoldModule extends Module implements PacketListener, IMin
       float[] n = ScaffoldMath.normalizeFrom(
           PlayerUpdateHook.lastReportedYaw(player), PlayerUpdateHook.lastReportedPitch(player),
           target.yaw, target.pitch);
-      float yaw = n[0];
+      float yaw = safeSentYaw(player, n[0]);
       float pitch = n[1];
       int mf = moveFix.getValue();
       if (ScaffoldMoveFix.writesCamera(mf)) {
@@ -1218,6 +1233,7 @@ public final class ScaffoldModule extends Module implements PacketListener, IMin
       yaw = ScaffoldMath.quantize(target.yaw);
       pitch = ScaffoldMath.quantize(target.pitch);
     }
+    yaw = safeSentYaw(player, yaw);
 
     Vec3 hitVec = ScaffoldMath.findPlacementHit(player, target.interactedBlockPos, target.faceOrdinal, yaw, pitch);
     // Fail-closed: never place with targeting hitVec alone (AirLiquidPlace → GroundSpoof).
@@ -1317,6 +1333,7 @@ public final class ScaffoldModule extends Module implements PacketListener, IMin
 
   private void applyJittered(EntityPlayerSP player, float yaw, float pitch, float reportedYaw, float reportedPitch) {
     int mf = moveFix.getValue();
+    yaw = safeSentYaw(player, yaw);
     if (ScaffoldMoveFix.writesCamera(mf)) {
       player.rotationYaw = yaw;
       player.rotationPitch = pitch;

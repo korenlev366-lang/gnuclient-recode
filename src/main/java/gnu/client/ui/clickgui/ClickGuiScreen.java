@@ -58,7 +58,7 @@ public class ClickGuiScreen extends GuiScreen {
             byCategory.get(module.getCategory()).add(module);
         }
 
-        ClickGuiLayout layout = ConfigManager.INSTANCE.getClickGuiLayout();
+        ClickGuiLayout layout = ConfigManager.instance().getClickGuiLayout();
         columns.clear();
         int z = 0;
         for (Category category : Category.values()) {
@@ -101,16 +101,16 @@ public class ClickGuiScreen extends GuiScreen {
         for (CategoryColumn column : columns) {
             column.resetTransient();
         }
-        ConfigManager.INSTANCE.flush();
+        ConfigManager.instance().flush();
         UiBlur.endFrame();
     }
 
     private void persistAllLayout() {
-        ClickGuiLayout layout = ConfigManager.INSTANCE.getClickGuiLayout();
+        ClickGuiLayout layout = ConfigManager.instance().getClickGuiLayout();
         for (CategoryColumn column : columns) {
             column.persistTo(layout);
         }
-        ConfigManager.INSTANCE.setClickGuiLayout(layout);
+        ConfigManager.instance().setClickGuiLayout(layout);
         layoutDirty = false;
     }
 
