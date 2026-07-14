@@ -22,7 +22,7 @@ import net.minecraft.util.Vec3;
 import java.util.Random;
 
 /**
- * OpenMyau KillAura auto-block mode switch (cases 0–8).
+ * OpenMyau KillAura auto-block mode switch (cases 0–9).
  * KillAuraModule owns settings and combat gates; this helper owns block/blink state.
  */
 public final class KillAuraAutoBlock {
@@ -36,6 +36,7 @@ public final class KillAuraAutoBlock {
     public static final int SWAP = 6;
     public static final int LEGIT = 7;
     public static final int FAKE = 8;
+    public static final int GRIM = 9;
 
     private final Random random = new Random();
 
@@ -44,6 +45,8 @@ public final class KillAuraAutoBlock {
     private boolean blockingState;
     private int blockTick;
     private boolean blinkReset;
+    private int grimState;
+    private int grimReleaseTick;
     private int lastMode = NONE;
 
     /** Inputs for one KillAura preUpdate combat tick. */
@@ -59,6 +62,7 @@ public final class KillAuraAutoBlock {
         public boolean manualUseKeyDown;
         /** KillAura AutoBlockRequirePress setting. */
         public boolean requirePress;
+        public int grimReleaseDelay;
         public long attackDelayMs;
         public float yaw;
         public float pitch;
@@ -81,6 +85,8 @@ public final class KillAuraAutoBlock {
         setAutoBlockBlink(false);
         blinkReset = false;
         blockTick = 0;
+        grimState = 0;
+        grimReleaseTick = 0;
         isBlocking = false;
         fakeBlockState = false;
         if (blockingState || isPlayerBlocking())
@@ -401,6 +407,63 @@ public final class KillAuraAutoBlock {
                     if (isUseKeyDown() && !isPlayerBlocking() && !digging && !placing)
                         swap = true;
                     break;
+                case GRIM:
+                    if (ctx.hasValidTarget) {
+                        switch (grimState) {
+                            case 0:
+                                attack = true;
+                                isBlocking = false;
+                                fakeBlockState = false;
+                                grimState = 1;
+                                break;
+                            case 1:
+                                if (!digging && !placing && !isPlayerBlocking()) {
+                                    NoSlowModule noSlow = NoSlowModule.instance();
+                                    if (noSlow == null || !noSlow.isEnabled() || !noSlow.isGrimMode()) {
+                                        EntityPlayerSP player = Mc.player();
+                                        if (player != null)
+                                            Mc.sendHeldItemChange(grimSwapSlot(player.inventory.currentItem));
+                                    }
+                                    swap = true;
+                                }
+                                attack = false;
+                                isBlocking = true;
+                                fakeBlockState = false;
+                                grimState = 2;
+                                break;
+                            case 2:
+                                if (isPlayerBlocking())
+                                    stopBlock();
+                                attack = false;
+                                isBlocking = false;
+                                fakeBlockState = false;
+                                grimReleaseTick = 0;
+                                grimState = 3;
+                                break;
+                            case 3:
+                                grimReleaseTick++;
+                                if (grimReleaseTick >= ctx.grimReleaseDelay)
+                                    grimState = 4;
+                                break;
+                            case 4:
+                                if (ctx.attackDelayMs <= 0L)
+                                    grimState = 0;
+                                break;
+                            default:
+                                grimState = 0;
+                                break;
+                        }
+                        setAutoBlockBlink(false);
+                    } else {
+                        if (isPlayerBlocking())
+                            stopBlock();
+                        setAutoBlockBlink(false);
+                        isBlocking = false;
+                        fakeBlockState = false;
+                        grimState = 0;
+                        grimReleaseTick = 0;
+                    }
+                    break;
                 default:
                     setAutoBlockBlink(false);
                     isBlocking = false;
@@ -551,6 +614,10 @@ public final class KillAuraAutoBlock {
             }
         }
         return Math.floorMod(currentSlot - 1, 9);
+    }
+
+    private int grimSwapSlot(int currentSlot) {
+        return currentSlot == 0 ? 1 : 0;
     }
 
     static int findSwordSlot(int currentSlot) {

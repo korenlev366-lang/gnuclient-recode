@@ -6,12 +6,10 @@ import static org.junit.Assert.*;
 
 public class NoSlowModeTest {
     @Test
-    public void grimAlternates20Then100() {
-        // OpenMyau: count++ then even→100 odd→20 (first call odd → 20)
-        NoSlowModule.MotionCounter c = new NoSlowModule.MotionCounter();
-        assertEquals(20, NoSlowModule.grimMotionPercent(c));
-        assertEquals(100, NoSlowModule.grimMotionPercent(c));
-        assertEquals(20, NoSlowModule.grimMotionPercent(c));
+    public void grimSlotSpoofAlternatesCurrentAndSwapSlot() {
+        assertEquals(1, NoSlowModule.nextGrimSlot(0, 1, true, -1));
+        assertEquals(0, NoSlowModule.nextGrimSlot(0, 1, false, 1));
+        assertEquals(2, NoSlowModule.nextGrimSlot(1, 1, false, 1));
     }
 
     @Test

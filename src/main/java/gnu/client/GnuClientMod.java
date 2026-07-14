@@ -25,6 +25,7 @@ import gnu.client.module.modules.network.BlinkModule;
 import gnu.client.module.modules.network.KnockbackDelayModule;
 import gnu.client.module.modules.network.LagrangeModule;
 import gnu.client.module.modules.network.PingFixModule;
+import gnu.client.module.modules.player.AutoPlaceModule;
 import gnu.client.module.modules.player.BridgeAssistModule;
 import gnu.client.module.modules.player.DelayRemoverModule;
 import gnu.client.module.modules.player.FastPlaceModule;
@@ -58,7 +59,7 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
 public class GnuClientMod {
 
     public static final String MOD_ID = "gnuclient";
-    public static final String VERSION = "1.5.0";
+    public static final String VERSION = "1.6.0";
 
     public static GnuClientMod instance;
     public static ModuleManager moduleManager;
@@ -106,6 +107,7 @@ public class GnuClientMod {
         safeRegister(new MoreKBModule());
         safeRegister(new SprintModule());
         safeRegister(new NoSlowModule());
+        safeRegister(new AutoPlaceModule());
         safeRegister(new BridgeAssistModule());
         safeRegister(new FastStopModule());
         safeRegister(new TimerModule());

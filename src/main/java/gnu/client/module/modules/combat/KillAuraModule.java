@@ -116,11 +116,12 @@ public final class KillAuraModule extends Module {
     private final BoolSetting inventoryCheck = addSetting(new BoolSetting("InventoryCheck", true));
 
     private static final List<String> AUTO_BLOCK_MODES = Arrays.asList(
-        "NONE", "VANILLA", "SPOOF", "HYPIXEL", "BLINK", "INTERACT", "SWAP", "LEGIT", "FAKE");
+        "NONE", "VANILLA", "SPOOF", "HYPIXEL", "BLINK", "INTERACT", "SWAP", "LEGIT", "FAKE", "GRIM");
     private final ModeSetting autoBlock = addSetting(new ModeSetting("Auto-block", 0, AUTO_BLOCK_MODES));
     private final SliderSetting autoBlockCps = addSetting(new SliderSetting("AutoBlockCPS", 8.0f, 1.0f, 10.0f));
     private final SliderSetting autoBlockRange = addSetting(new SliderSetting("AutoBlockRange", 6.0f, 3.0f, 8.0f));
     private final BoolSetting autoBlockRequirePress = addSetting(new BoolSetting("AutoBlockRequirePress", false));
+    private final SliderSetting grimReleaseDelay = addSetting(new SliderSetting("GrimReleaseDelay", 2.0f, 1.0f, 10.0f, 1.0f));
     private final KillAuraAutoBlock autoBlockHelper = new KillAuraAutoBlock();
 
     // ── State ─────────────────────────────────────────────────────────────
@@ -143,6 +144,7 @@ public final class KillAuraModule extends Module {
         autoBlockCps.visibleWhen(() -> autoBlock.getValue() != KillAuraAutoBlock.NONE);
         autoBlockRange.visibleWhen(() -> autoBlock.getValue() != KillAuraAutoBlock.NONE);
         autoBlockRequirePress.visibleWhen(() -> autoBlock.getValue() != KillAuraAutoBlock.NONE);
+        grimReleaseDelay.visibleWhen(() -> autoBlock.getValue() == KillAuraAutoBlock.GRIM);
         switchDelayMs.visibleWhen(() -> mode.getValue() == MODE_SWITCH);
         minCps.visibleWhen(() -> cpsMode.getValue() == CPS_NORMAL);
         maxCps.visibleWhen(() -> cpsMode.getValue() == CPS_NORMAL);
@@ -215,6 +217,15 @@ public final class KillAuraModule extends Module {
             return false;
         KillAuraModule ka = (KillAuraModule) module;
         return ka.attackTarget != null || ka.autoBlockHelper.isBlockingSession();
+    }
+
+    public static boolean isAutoBlockHandlingBlock() {
+        Module module = ModuleManager.instance().getModule("KillAura");
+        if (!(module instanceof KillAuraModule) || !module.isEnabled())
+            return false;
+        KillAuraModule ka = (KillAuraModule) module;
+        return ka.autoBlock.getValue() != KillAuraAutoBlock.NONE
+            && ka.autoBlockHelper.isBlockingSession();
     }
 
     public static void onPreUpdate(Object player) {
@@ -340,6 +351,7 @@ public final class KillAuraModule extends Module {
         ctx.canAutoBlock = canAutoBlock();
         ctx.manualUseKeyDown = Mc.isPhysicalRmbDown() || Mc.isUseItemKeyDown();
         ctx.requirePress = autoBlockRequirePress.getValue();
+        ctx.grimReleaseDelay = Math.round(grimReleaseDelay.getValue());
         ctx.attackDelayMs = remainingDelay;
         ctx.yaw = aimYaw;
         ctx.pitch = aimPitch;

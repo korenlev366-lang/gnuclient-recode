@@ -7,20 +7,19 @@ import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.runtime.FloatManager;
-import gnu.client.runtime.FloatModules;
 import gnu.client.runtime.mc.Mc;
+import gnu.client.utility.PacketUtils;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.item.EnumAction;
 import net.minecraft.item.ItemPotion;
 import net.minecraft.item.ItemStack;
+import net.minecraft.network.play.client.C09PacketHeldItemChange;
 
 import java.util.Arrays;
 import java.util.List;
 
 /**
- * NoSlow — OpenMyau settings/API + FloatManager.NO_SLOW ownership.
- * Slowdown cancel mixin is Task 5; do not activate BlinkModules.NO_SLOW.
+ * NoSlow — OpenMyau settings/API with wsamiaw Grim slot-spoof behavior.
  */
 public final class NoSlowModule extends Module {
 
@@ -43,12 +42,9 @@ public final class NoSlowModule extends Module {
     private final SliderSetting bowMotion = addSetting(new SliderSetting("bow-motion", 100f, 0f, 100f, 1f));
     private final BoolSetting bowSprint = addSetting(new BoolSetting("bow-sprint", true));
 
-    private final MotionCounter motionCounter = new MotionCounter();
-
-    /** Mutable counter for grim 20/100 alternation (testable). */
-    public static final class MotionCounter {
-        public int count;
-    }
+    private boolean spoofingSlot;
+    private boolean toggleSlot;
+    private int lastSentSlot = -1;
 
     public NoSlowModule() {
         super("NoSlow", "Cancel item-use slowdown (sword/food/bow)", Category.PLAYER);
@@ -64,17 +60,6 @@ public final class NoSlowModule extends Module {
     public static NoSlowModule instance() {
         Module module = ModuleManager.instance().getModule("NoSlow");
         return module instanceof NoSlowModule ? (NoSlowModule) module : null;
-    }
-
-    /**
-     * OpenMyau grim motion: {@code count++} then even→100, odd→20.
-     * First call returns 20.
-     */
-    public static int grimMotionPercent(MotionCounter c) {
-        c.count++;
-        if (c.count % 2 == 0)
-            return 100;
-        return 20;
     }
 
     public boolean isSwordActive() {
@@ -96,54 +81,109 @@ public final class NoSlowModule extends Module {
         return bowMode.getValue() != MODE_NONE && Mc.isHoldingBow();
     }
 
+    public boolean isGrimMode() {
+        return (swordMode.getValue() == MODE_GRIM && Mc.isHoldingSword())
+            || (foodMode.getValue() == MODE_GRIM && isEating());
+    }
+
     public boolean isAnyActive() {
+        if (isGrimMode())
+            return Mc.isUsingItem();
         return Mc.isUsingItem() && (isSwordActive() || isFoodActive() || isBowActive());
     }
 
     public boolean canSprint() {
+        if (isGrimMode())
+            return true;
         return (isSwordActive() && swordSprint.getValue())
-                || (isFoodActive() && foodSprint.getValue())
-                || (isBowActive() && bowSprint.getValue());
+            || (isFoodActive() && foodSprint.getValue())
+            || (isBowActive() && bowSprint.getValue());
     }
 
     public int getMotionMultiplier() {
-        if (Mc.isHoldingSword()) {
-            if (swordMode.getValue() == MODE_GRIM)
-                return grimMotionPercent(motionCounter);
-            motionCounter.count++;
+        if (isGrimMode()) {
+            if (Mc.isHoldingSword())
+                return Math.round(swordMotion.getValue());
+            if (isEating())
+                return Math.round(foodMotion.getValue());
+        }
+        if (Mc.isHoldingSword())
             return Math.round(swordMotion.getValue());
-        }
-        if (isEating()) {
-            if (foodMode.getValue() == MODE_GRIM)
-                return grimMotionPercent(motionCounter);
-            motionCounter.count++;
+        if (isEating())
             return Math.round(foodMotion.getValue());
-        }
-        if (Mc.isHoldingBow()) {
-            if (bowMode.getValue() == MODE_GRIM)
-                return grimMotionPercent(motionCounter);
-            motionCounter.count++;
+        if (Mc.isHoldingBow())
             return Math.round(bowMotion.getValue());
-        }
-        motionCounter.count++;
         return 100;
     }
 
     @Override
-    public void onEnable() {}
-
-    @Override
-    public void onDisable() {
-        FloatManager.INSTANCE.setFloatState(false, FloatModules.NO_SLOW);
+    public void onEnable() {
+        resetSlotSpoof();
     }
 
     @Override
-    public void onTick() {
-        if (!isEnabled()) {
-            FloatManager.INSTANCE.setFloatState(false, FloatModules.NO_SLOW);
-            return;
+    public void onDisable() {
+        resetSlotSpoof();
+    }
+
+    @Override
+    public void onTickStart() {
+        if (isGrimMode() && Mc.isUsingItem() && !KillAuraModule.isAutoBlockHandlingBlock()) {
+            updateGrimSlotSpoof();
+        } else {
+            resetSlotSpoof();
         }
-        FloatManager.INSTANCE.setFloatState(isAnyActive(), FloatModules.NO_SLOW);
+    }
+
+    @Override
+    public void onTick() {}
+
+    /**
+     * wsamiaw Grim NoSlow: alternate C09 selected slot while using the item so Grim's
+     * slot-change check keeps the NoSlow flag from accumulating.
+     */
+    private void updateGrimSlotSpoof() {
+        EntityPlayerSP player = Mc.player();
+        if (player == null)
+            return;
+        int item = player.inventory.currentItem;
+        if (!spoofingSlot) {
+            spoofingSlot = true;
+            toggleSlot = true;
+            lastSentSlot = -1;
+        }
+        int target = nextGrimSlot(item, swapSlot(), toggleSlot, lastSentSlot);
+        PacketUtils.sendPacketNoEvent(new C09PacketHeldItemChange(target));
+        lastSentSlot = target;
+        toggleSlot = !toggleSlot;
+    }
+
+    private void resetSlotSpoof() {
+        EntityPlayerSP player = Mc.player();
+        if (spoofingSlot && player != null) {
+            int item = player.inventory.currentItem;
+            if (item != lastSentSlot)
+                PacketUtils.sendPacketNoEvent(new C09PacketHeldItemChange(item));
+        }
+        spoofingSlot = false;
+        toggleSlot = false;
+        lastSentSlot = -1;
+    }
+
+    private int swapSlot() {
+        int slot = 1;
+        Module module = ModuleManager.instance().getModule("NoSlow");
+        if (module instanceof NoSlowModule) {
+            // Existing wsamiaw default is slot 1; keep the same default without adding a GUI setting.
+        }
+        return slot;
+    }
+
+    static int nextGrimSlot(int currentSlot, int swapSlot, boolean toggle, int lastSentSlot) {
+        int target = toggle ? swapSlot : currentSlot;
+        if (target == lastSentSlot)
+            target = (target + 1) % 9;
+        return target;
     }
 
     /**
