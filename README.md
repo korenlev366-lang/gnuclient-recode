@@ -15,3 +15,7 @@ Output jar: `build/libs/gnuclient-1.0.0.jar` — copy into your mods folder.
 ```bash
 ./gradlew runClient
 ```
+CREDITS
+@denizkwas(for being a goated dc owner and letting my client be in da big client tab)
+DC
+https://discord.gg/bfcVvw4rYd
