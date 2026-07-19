@@ -369,7 +369,8 @@ public final class HudRenderer {
             float suffixW = 0f;
             String suffix = row.suffix;
             if (showSuffixes && suffix != null && !suffix.isEmpty()) {
-                suffixW = UiFont.width(suffix) + 6f;
+                int fixed = row.module.getFixedSuffixWidth();
+                suffixW = (fixed >= 0 ? fixed : UiFont.width(suffix)) + 6f;
             }
             float nameW = UiFont.width(row.name);
             float contentW = nameW + suffixW;
@@ -568,8 +569,13 @@ public final class HudRenderer {
             suffix = sanitizeSuffixes(module.getSuffix());
             label = displayLabel(module, showSuffixes);
             float nameW = UiFont.width(name);
-            float suffixW = (showSuffixes && suffix != null && !suffix.isEmpty())
-                    ? UiFont.width(suffix) + 6f : 0f;
+            float suffixW;
+            if (showSuffixes && suffix != null && !suffix.isEmpty()) {
+                int fixed = module.getFixedSuffixWidth();
+                suffixW = (fixed >= 0 ? fixed : UiFont.width(suffix)) + 6f;
+            } else {
+                suffixW = 0f;
+            }
             measuredWidth = nameW + suffixW + ARRAY_PAD_L + ARRAY_PAD_X;
         }
     }

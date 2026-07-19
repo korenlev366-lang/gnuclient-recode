@@ -8,6 +8,7 @@ import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.module.modules.combat.killaura.KillAuraAutoBlock;
 import gnu.client.module.modules.network.LagrangeModule;
+import gnu.client.module.modules.network.BacktrackModule;
 import gnu.client.runtime.MoveFixUtil;
 import gnu.client.runtime.AuraCombatPacketGuard;
 import gnu.client.runtime.CombatAttackNotify;

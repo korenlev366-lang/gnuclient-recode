@@ -3,18 +3,22 @@ package gnu.client.module.modules.network;
 import gnu.client.mixin.RealPosAccess;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
+import gnu.client.module.ModuleManager;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.combat.RavenAntiBot;
 import gnu.client.module.modules.network.KnockbackDelayModule;
+import gnu.client.runtime.CombatAttackNotify;
 import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
+import gnu.client.runtime.packet.InboundLagCoordinator;
 import gnu.client.runtime.packet.PacketUtil;
 import gnu.client.util.EspDraw;
 import gnu.client.util.RenderHelper;
+import gnu.client.ui.UiFont;
 
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.multiplayer.WorldClient;
@@ -46,19 +50,26 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Augustus b2.6 BackTrack — faithful port.
+ * gnuclient-recode BackTrack — attack-gated activation, faithful to the original.
  *
- * <p>Holds clientbound packets in a raw list and cancels them until the geometry says
- * "now is a good moment": when the player's eyes are closer to the target's <i>server</i>
- * position ({@code realPos}) than its <i>rendered</i> position, within hit range, and
- * before the configured {@code Time} delay has elapsed. The entity is rendered at its
- * server position via {@code realPosX/Y/Z} (RealPosAccess), which are updated from
- * every {@code S14}/{@code S18} packet.
+ * <p>Packets are only held within the post-attack window: BackTrack delays inbound packets
+ * for {@code HurtTime} ms after the most recent hit (tracked via {@link CombatAttackNotify}),
+ * and pauses while taking knockback. Simply approaching a player does nothing — it is an
+ * attack aid, not a passive hold. Each hold rolls a packet delay in [MinDelay, MaxDelay]
+ * shown in the ArrayList. The target is rendered at its past position via {@code realPosX/Y/Z}
+ * (RealPosAccess); the ESP draws the smooth true server position Lagrange-style.
  */
 public final class BacktrackModule extends Module implements PacketListener {
 
     private final SliderSetting hitRange = addSetting(new SliderSetting("MaxHitRange", 6.0f, 3.0f, 6.0f));
-    private final SliderSetting timeDelay = addSetting(new SliderSetting("Time", 4000.0f, 0.0f, 30000.0f));
+    /** BackTrack packet-delay range (ms). Each hold rolls a value in [MinDelay, MaxDelay]
+     *  — e.g. 300-400 rolls 353, so inbound packets are delayed by 353ms that hold. */
+    private final SliderSetting minTime = addSetting(new SliderSetting("MinDelay", 1000.0f, 0.0f, 10000.0f, 10.0f));
+    private final SliderSetting maxTime = addSetting(new SliderSetting("MaxDelay", 4000.0f, 0.0f, 10000.0f, 10.0f));
+    /** How long (ms) BackTrack keeps delaying packets after you hit the enemy. The hold
+     *  starts on attack and flushes HurtTime ms later (mirrors the old gnuclient BackTrack
+     *  post-attack window). */
+    private final SliderSetting hurtTime = addSetting(new SliderSetting("HurtTime", 250.0f, 0.0f, 1000.0f, 10.0f));
     private final BoolSetting esp = addSetting(new BoolSetting("Esp", true));
     private final BoolSetting onlyWhenNeed = addSetting(new BoolSetting("OnlyWhenNeed", true));
     private final BoolSetting player = addSetting(new BoolSetting("Player", true));
@@ -76,7 +87,24 @@ public final class BacktrackModule extends Module implements PacketListener {
     private final List<Packet<?>> packets = new ArrayList<>();
     private EntityLivingBase entity;
     private boolean blockPackets;
-    private long blockStartMs;
+
+    /** Per-hold delay, randomized between MinTime and MaxTime at the start of each hold. */
+    private long currentDelay;
+
+    /**
+     * Live true server position of the target (plain double world coords), tracked for the
+     * ESP from the same S14/S18 packets we intercept. Unlike {@code realPos}, this is NOT
+     * frozen during a hold — it shows where the target actually is server-side right now,
+     * smoothly interpolated Lagrange-style so the ghost box doesn't snap.
+     */
+    private double espServerX, espServerY, espServerZ;
+    private boolean espServerValid;
+    private double espIndFromX, espIndFromY, espIndFromZ;
+    private double espIndToX, espIndToY, espIndToZ;
+    private boolean espIndValid;
+    private long espIndStartMs;
+    private static final long ESP_INTERP_MS = 80L;
+    private static final double ESP_POS_EPS = 1.0e-6;
 
     /** True while inbound packets are being held (used by PingFix to keep ping in sync). */
     public boolean isLagging() {
@@ -94,6 +122,7 @@ public final class BacktrackModule extends Module implements PacketListener {
     @Override
     public void onEnable() {
         blockPackets = false;
+        currentDelay = (long) (float) maxTime.getValue();
         PacketEvents.register(this);
         WorldClient world = Mc.world();
         EntityPlayerSP player = Mc.player();
@@ -117,6 +146,7 @@ public final class BacktrackModule extends Module implements PacketListener {
         packets.clear();
         entity = null;
         blockPackets = false;
+        InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
     }
 
     @Override
@@ -130,6 +160,17 @@ public final class BacktrackModule extends Module implements PacketListener {
             return;
         }
 
+        // Never hold while blocking/using an item — Grim scrutinizes movement/slowdown then.
+        if (Mc.isBlocking() || Mc.isUsingItem()) {
+            blockPackets = false;
+            resetPackets();
+            InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
+            entity = null;
+            return;
+        }
+
+        // Target selection: KillAura's target if it has one, else the nearest attacked-able
+        // entity (unless OnlyKillAura restricts us to KA's target).
         if (KillAuraModule.getCurrentTarget() instanceof EntityLivingBase) {
             entity = (EntityLivingBase) KillAuraModule.getCurrentTarget();
         } else {
@@ -142,57 +183,40 @@ public final class BacktrackModule extends Module implements PacketListener {
                 entity = null;
         }
 
-        if (entity == null || player == null || world == null) {
+        if (entity == null) {
             blockPackets = false;
             resetPackets();
             return;
         }
 
-        RealPosAccess erp = realPos(entity);
-        double d0 = erp.getRealPosX() / 32.0;
-        double d2 = erp.getRealPosY() / 32.0;
-        double d3 = erp.getRealPosZ() / 32.0;
-        double d4 = entity.serverPosX / 32.0;
-        double d5 = entity.serverPosY / 32.0;
-        double d6 = entity.serverPosZ / 32.0;
-        float f = entity.width / 2.0f;
+        long now = System.currentTimeMillis();
+        long lastAttack = CombatAttackNotify.getLastAttackMs();
 
-        net.minecraft.util.AxisAlignedBB entityServerPos = new net.minecraft.util.AxisAlignedBB(
-                d4 - f, d5, d6 - f, d4 + f, d5 + entity.height, d6 + f);
-        Vec3 positionEyes = player.getPositionEyes(1.0f);
-        double currentX = MathHelper.clamp_double(positionEyes.xCoord, entityServerPos.minX, entityServerPos.maxX);
-        double currentY = MathHelper.clamp_double(positionEyes.yCoord, entityServerPos.minY, entityServerPos.maxY);
-        double currentZ = MathHelper.clamp_double(positionEyes.zCoord, entityServerPos.minZ, entityServerPos.maxZ);
+        // Old gnuclient BackTrack activation: packets are only held within the post-attack
+        // window (HurtTime ms after the most recent hit). Outside that window we never hold,
+        // so merely approaching a player does nothing — BackTrack is an attack aid. Taking
+        // knockback (hurtTime 3..9) pauses the hold so we stop delaying the moment we're hit.
+        boolean inRange = player.getDistanceToEntity(entity) < hitRange.getValue();
+        boolean withinAttackWindow = now - lastAttack <= (long) (float) hurtTime.getValue();
+        boolean takingKnockback = player.hurtTime >= 3 && player.hurtTime <= 9;
 
-        net.minecraft.util.AxisAlignedBB entityPosMe = new net.minecraft.util.AxisAlignedBB(
-                d0 - f, d2, d3 - f, d0 + f, d2 + entity.height, d3 + f);
-        double realX = MathHelper.clamp_double(positionEyes.xCoord, entityPosMe.minX, entityPosMe.maxX);
-        double realY = MathHelper.clamp_double(positionEyes.yCoord, entityPosMe.minY, entityPosMe.maxY);
-        double realZ = MathHelper.clamp_double(positionEyes.zCoord, entityPosMe.minZ, entityPosMe.maxZ);
+        boolean shouldBlock = inRange && withinAttackWindow && !takingKnockback;
 
-        double distance = hitRange.getValue();
-        if (!player.canEntityBeSeen(entity))
-            distance = distance > 3.0 ? 3.0 : distance;
-
-        // "b" = the player's eyes are closer to the entity's server (past) position than
-        // to its currently-rendered position — i.e. holding packets keeps the entity at a
-        // spot you can still hit. Taking knockback (hurtTime 3..8) or OnlyWhenNeed off
-        // force a release instead.
-        boolean b = positionEyes.distanceTo(new Vec3(currentX, currentY, currentZ))
-                > positionEyes.distanceTo(new Vec3(realX, realY, realZ));
-        if (player.hurtTime < 8 && player.hurtTime > 3)
-            b = false;
-        if (!onlyWhenNeed.getValue())
-            b = true;
-
-        if (b
-                && player.getDistanceToEntity(entity) < distance
-                && System.currentTimeMillis() - blockStartMs >= timeDelay.getValue().longValue()) {
+        if (shouldBlock) {
+            if (!blockPackets) {
+                // Fresh hold: roll the randomized packet-delay value for the HUD.
+                float lo = Math.min(minTime.getValue(), maxTime.getValue());
+                float hi = Math.max(minTime.getValue(), maxTime.getValue());
+                currentDelay = (long) (lo + Math.random() * Math.max(0.0f, hi - lo));
+                InboundLagCoordinator.tryAcquire(InboundLagCoordinator.Owner.BACKTRACK);
+            }
             blockPackets = true;
         } else {
-            blockPackets = false;
-            resetPackets();
-            blockStartMs = System.currentTimeMillis();
+            if (blockPackets) {
+                blockPackets = false;
+                resetPackets();
+                InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
+            }
         }
     }
 
@@ -208,12 +232,14 @@ public final class BacktrackModule extends Module implements PacketListener {
         if (Mc.currentScreen() != null)
             return false;
 
-        // Sync with KnockbackDelay: only one module may own the inbound stream at a time.
-        // When KBD is holding packets, yield so the two don't fight over the same packets.
-        if (KnockbackDelayModule.isOwningInboundQueue() || KnockbackDelayModule.isBlockingBacktrack()) {
+        // Sync via the shared coordinator: only the highest-priority owner may hold the
+        // inbound stream. Yield to KnockbackDelay (highest) and Lagrange (middle) so the
+        // three lag modules never queue packets simultaneously.
+        if (InboundLagCoordinator.isBlockedFor(InboundLagCoordinator.Owner.BACKTRACK)) {
             if (!packets.isEmpty())
                 resetPackets();
             blockPackets = false;
+            InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
             return false;
         }
 
@@ -232,6 +258,11 @@ public final class BacktrackModule extends Module implements PacketListener {
                 rp.setRealPosX(rp.getRealPosX() + p.func_149062_c());
                 rp.setRealPosY(rp.getRealPosY() + p.func_149061_d());
                 rp.setRealPosZ(rp.getRealPosZ() + p.func_149064_e());
+                if (elb == entity)
+                    trackEspServer(
+                            rp.getRealPosX() / 32.0,
+                            rp.getRealPosY() / 32.0,
+                            rp.getRealPosZ() / 32.0);
             }
         }
 
@@ -244,6 +275,11 @@ public final class BacktrackModule extends Module implements PacketListener {
                 rp.setRealPosX(p.getX());
                 rp.setRealPosY(p.getY());
                 rp.setRealPosZ(p.getZ());
+                if (elb == entity)
+                    trackEspServer(
+                            rp.getRealPosX() / 32.0,
+                            rp.getRealPosY() / 32.0,
+                            rp.getRealPosZ() / 32.0);
             }
         }
 
@@ -252,7 +288,7 @@ public final class BacktrackModule extends Module implements PacketListener {
             return false;
         }
 
-        if (delayPackets(packet)) {
+        if (blockPackets && delayPackets(packet)) {
             packets.add((Packet<?>) packet);
             return true;
         }
@@ -261,13 +297,13 @@ public final class BacktrackModule extends Module implements PacketListener {
 
     @Override
     public void onRender(float partialTicks) {
-        if (!esp.getValue() || entity == null || !blockPackets || !Mc.isInGame())
+        if (!esp.getValue() || entity == null || !blockPackets || !espServerValid || !Mc.isInGame())
             return;
 
-        RealPosAccess rrp = realPos(entity);
-        double rx = rrp.getRealPosX() / 32.0;
-        double ry = rrp.getRealPosY() / 32.0;
-        double rz = rrp.getRealPosZ() / 32.0;
+        double[] server = espServerPos(partialTicks);
+        double rx = server[0];
+        double ry = server[1];
+        double rz = server[2];
         float f = entity.width / 2.0f;
 
         double[] vp = Mc.getViewerPos(partialTicks);
@@ -291,6 +327,48 @@ public final class BacktrackModule extends Module implements PacketListener {
                 rx + f - vp[0], ry + entity.height - vp[1], rz + f - vp[2],
                 r, g, bl, alpha);
         RenderHelper.end();
+    }
+
+    /** Records the latest true server position of the target (world coords). */
+    private void trackEspServer(double x, double y, double z) {
+        if (!espServerValid || serverPosChanged(x, y, z, espServerX, espServerY, espServerZ)) {
+            espIndFromX = espServerValid ? espServerX : x;
+            espIndFromY = espServerValid ? espServerY : y;
+            espIndFromZ = espServerValid ? espServerZ : z;
+            espIndToX = x;
+            espIndToY = y;
+            espIndToZ = z;
+            espIndValid = true;
+            espIndStartMs = System.currentTimeMillis();
+        }
+        espServerX = x;
+        espServerY = y;
+        espServerZ = z;
+        espServerValid = true;
+    }
+
+    /** Returns the interpolated true server position for the ESP (Lagrange-style lerp). */
+    private double[] espServerPos(float partialTicks) {
+        if (!espIndValid)
+            return new double[] { espServerX, espServerY, espServerZ };
+        long elapsed = System.currentTimeMillis() - espIndStartMs;
+        float t = elapsed >= ESP_INTERP_MS ? 1.0f : (float) elapsed / (float) ESP_INTERP_MS;
+        return new double[] {
+                lerp(espIndFromX, espIndToX, t),
+                lerp(espIndFromY, espIndToY, t),
+                lerp(espIndFromZ, espIndToZ, t)
+        };
+    }
+
+    private static boolean serverPosChanged(double ax, double ay, double az,
+                                            double bx, double by, double bz) {
+        return Math.abs(ax - bx) > ESP_POS_EPS
+                || Math.abs(ay - by) > ESP_POS_EPS
+                || Math.abs(az - bz) > ESP_POS_EPS;
+    }
+
+    private static double lerp(double from, double to, double t) {
+        return from + (to - from) * t;
     }
 
     private boolean canAttacked(Entity entity) {
@@ -322,6 +400,10 @@ public final class BacktrackModule extends Module implements PacketListener {
     }
 
     private boolean delayPackets(Object packet) {
+        // Never hold transactions — delaying S32 confirmations desyncs transaction-based
+        // anti-cheats and causes skipped/flagged packets (Post/Pre attack verification).
+        if (PacketHelper.isServerConfirmTransaction(packet))
+            return false;
         if (packet instanceof S03PacketTimeUpdate)
             return packetTimeUpdate.getValue();
         if (packet instanceof S00PacketKeepAlive)
@@ -330,11 +412,11 @@ public final class BacktrackModule extends Module implements PacketListener {
             return packetVelocity.getValue();
         if (packet instanceof S27PacketExplosion)
             return packetVelocityExplosion.getValue();
+        // Never hold swing/status-update (opcode 2) — holding it suppresses KillAura's
+        // swing animation and flags the attack as Post/Pre with autoblock.
         if (packet instanceof S19PacketEntityStatus) {
             S19PacketEntityStatus status = (S19PacketEntityStatus) packet;
-            return status.getOpCode() != 2
-                    || !(Mc.world() != null
-                    && Mc.world().getEntityByID(PacketHelper.entityId(packet)) instanceof EntityLivingBase);
+            return status.getOpCode() != 2;
         }
         return !(packet instanceof S06PacketUpdateHealth)
                 && !(packet instanceof S29PacketSoundEffect)
@@ -357,5 +439,22 @@ public final class BacktrackModule extends Module implements PacketListener {
                 }
             }
         }
+    }
+
+    @Override
+    public String[] getSuffix() {
+        // Show the rolled packet delay for the current hold (e.g. 353ms), so the delay
+        // BackTrack is applying is visible in the ArrayList.
+        return new String[]{currentDelay + "ms"};
+    }
+
+    /**
+     * Pin the ArrayList row width so the entry does not re-sort/bob as the rolled delay
+     * changes length between holds. Uses the widest possible MaxDelay value as reference.
+     */
+    @Override
+    public int getFixedSuffixWidth() {
+        String widest = ((long) (float) maxTime.getValue()) + "ms";
+        return (int) UiFont.width(widest);
     }
 }

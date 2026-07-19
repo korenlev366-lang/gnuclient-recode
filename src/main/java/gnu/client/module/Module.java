@@ -131,6 +131,16 @@ public abstract class Module {
         return new String[0];
     }
 
+    /**
+     * Optional fixed suffix pixel-width used for ArrayList layout/sorting. When >= 0
+     * the HUD measures the row against this width instead of the live (often changing)
+     * suffix, so the entry stays pinned and doesn't bob as the suffix text changes.
+     * Returns -1 by default (use live width).
+     */
+    public int getFixedSuffixWidth() {
+        return -1;
+    }
+
     @SuppressWarnings("unchecked")
     protected <T extends Setting<?>> T addSetting(T setting) {
         settings.add(setting);

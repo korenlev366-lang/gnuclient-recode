@@ -1,16 +1,26 @@
 package gnu.client.runtime.packet;
 
 /**
- * Priority for inbound packet delay modules (highest wins).
- * raven-bS KnockbackDelay &gt; target Backtrack; neither queues with the other active.
+ * Priority for inbound packet lag modules (highest wins).
+ * KnockbackDelay &gt; Lagrange &gt; Backtrack — only the highest-priority active module
+ * owns the inbound stream; the others yield so they never queue packets simultaneously.
  */
 public final class InboundLagCoordinator {
 
     public enum Owner {
         NONE,
         KNOCKBACK_DELAY,
+        LAGRANGE,
         BACKTRACK
     }
+
+    /** Priority order: higher index wins. KnockbackDelay > Backtrack > Lagrange. */
+    private static final Owner[] PRIORITY = {
+            Owner.NONE,
+            Owner.LAGRANGE,
+            Owner.BACKTRACK,
+            Owner.KNOCKBACK_DELAY
+    };
 
     private static volatile Owner owner = Owner.NONE;
 
@@ -24,23 +34,36 @@ public final class InboundLagCoordinator {
         return owner == Owner.KNOCKBACK_DELAY;
     }
 
+    public static boolean lagrangeOwns() {
+        return owner == Owner.LAGRANGE;
+    }
+
     public static boolean backtrackOwns() {
         return owner == Owner.BACKTRACK;
     }
 
-    /** Knockback delay preempts backtrack. */
+    /** True if a higher-or-equal priority owner than {@code requested} currently holds the stream. */
+    public static boolean isBlockedFor(Owner requested) {
+        int reqRank = rankOf(requested);
+        int curRank = rankOf(owner);
+        return curRank > reqRank;
+    }
+
+    private static int rankOf(Owner o) {
+        for (int i = 0; i < PRIORITY.length; i++)
+            if (PRIORITY[i] == o)
+                return i;
+        return 0;
+    }
+
     public static boolean tryAcquire(Owner requested) {
         if (requested == Owner.NONE)
             return false;
-        if (requested == Owner.KNOCKBACK_DELAY) {
-            owner = Owner.KNOCKBACK_DELAY;
-            return true;
-        }
-        if (owner == Owner.NONE || owner == Owner.BACKTRACK) {
-            owner = Owner.BACKTRACK;
-            return true;
-        }
-        return false;
+        // Only acquire if nothing of higher priority owns the stream.
+        if (isBlockedFor(requested))
+            return false;
+        owner = requested;
+        return true;
     }
 
     public static void release(Owner releasing) {

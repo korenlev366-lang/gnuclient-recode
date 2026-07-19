@@ -11,6 +11,7 @@ import gnu.client.runtime.packet.LagrangeOutboundTrack;
 import gnu.client.runtime.packet.LagrangeOutboundTrack.EnumLagDirection;
 import gnu.client.runtime.packet.LagrangeOutboundTrack.LagRequest;
 import gnu.client.runtime.packet.LagrangeOutboundTrack.Timeout;
+import gnu.client.runtime.packet.InboundLagCoordinator;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
@@ -183,6 +184,11 @@ public final class LagrangeModule extends Module implements PacketListener {
     private void tickCombatLogic() {
         EntityPlayerSP player = Mc.player();
         WorldClient world = Mc.world();
+        // A higher-priority lag module (KnockbackDelay) now owns the inbound stream — back
+        // off immediately so the two never queue packets at the same time.
+        if (isLagging && InboundLagCoordinator.isBlockedFor(InboundLagCoordinator.Owner.LAGRANGE)) {
+            flushLag();
+        }
         if (player == null || world == null || player.isDead) {
             if (isLagging)
                 flushLag();
@@ -399,6 +405,10 @@ public final class LagrangeModule extends Module implements PacketListener {
      * Creates a new {@link LagRequest} and registers it with the handler.
      */
     private void startLag() {
+        // Only acquire if no higher-priority lag module (KnockbackDelay) owns the stream.
+        if (InboundLagCoordinator.isBlockedFor(InboundLagCoordinator.Owner.LAGRANGE))
+            return;
+        InboundLagCoordinator.tryAcquire(InboundLagCoordinator.Owner.LAGRANGE);
         isLagging = true;
         outboundLag = new LagRequest(EnumSet.of(EnumLagDirection.OUTBOUND), new ModuleBackedTimeout());
         BIDI_TRACK.requestLag(outboundLag);
@@ -415,6 +425,7 @@ public final class LagrangeModule extends Module implements PacketListener {
         if (!isLagging)
             return;
         isLagging = false;
+        InboundLagCoordinator.release(InboundLagCoordinator.Owner.LAGRANGE);
         if (outboundLag != null) {
             outboundLag.getTimeout().forceTimeOut();
             outboundLag = null;

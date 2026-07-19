@@ -20,14 +20,22 @@ public final class CombatAttackNotify {
     private static boolean prevPhysicalLmb;
     /** Set by {@link #noteAttack}; consumed by {@link #onForgeAttack}. */
     private static boolean skipNextForgeDuplicate;
+    /** Timestamp of the most recent attack (set in {@link #noteAttack}). */
+    private static long lastAttackMs = 0L;
 
     private CombatAttackNotify() {}
 
     public static void noteAttack(Object target) {
         if (!Mc.isInGame() || target == null)
             return;
+        lastAttackMs = System.currentTimeMillis();
         dispatch(target);
         skipNextForgeDuplicate = true;
+    }
+
+    /** Time of the most recent KillAura/physical attack, or 0 if none. */
+    public static long getLastAttackMs() {
+        return lastAttackMs;
     }
 
     /** From Forge {@code AttackEntityEvent} — skips if KillAura already notified. */
