@@ -24,3 +24,7 @@ runs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local-only build output / reference dumps (not source)
+bin/
+Augustus b2.6/
