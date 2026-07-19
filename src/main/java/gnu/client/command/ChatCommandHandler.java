@@ -40,6 +40,14 @@ public final class ChatCommandHandler implements PacketListener {
             return addChat(HelpCommand.execute(message));
         if (HideCommand.handles(message))
             return addChat(HideCommand.execute(message));
+
+        String scriptReply = gnu.client.script.Commands.tryHandle(message);
+        if (scriptReply != null) {
+            if (!scriptReply.isEmpty())
+                addChat(scriptReply);
+            return true;
+        }
+
         if (!BindCommand.handles(message))
             return false;
 

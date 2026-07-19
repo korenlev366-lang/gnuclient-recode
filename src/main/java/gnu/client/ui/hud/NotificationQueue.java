@@ -97,6 +97,17 @@ public final class NotificationQueue {
         enqueue(module.getName(), module.isEnabled(), System.nanoTime());
     }
 
+    /** Custom toast for scripts / non-module callers. */
+    public void pushToast(String title, boolean enabled) {
+        if (title == null || title.isEmpty()) {
+            return;
+        }
+        if (ConfigManager.instance().isLoading()) {
+            return;
+        }
+        enqueue(title, enabled, System.nanoTime());
+    }
+
     /** Package/test entry: enqueue with explicit final state (already sampled). */
     void enqueue(String moduleName, boolean enabled, long nowNs) {
         if (moduleName == null || moduleName.isEmpty()) {

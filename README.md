@@ -20,7 +20,8 @@ Output jar: `build/libs/gnuclient-1.0.0.jar` — copy into your mods folder.
 
 Example bare-body Java scripts live in [`scripts/`](scripts/). Copy them into
 `~/.config/gnuclient/scripts/` and reload with **Right Shift + R** (or restart).
-See [`scripts/README.md`](scripts/README.md) for the API notes.
+See [`scripts/README.md`](scripts/README.md) for the ultra-custom API:
+cross-module control, `draw` / `hud`, `shared` bus, script chat commands, and hooks.
 
 CREDITS
 @denizkwas(for being a goated dc owner and letting my client be in da big client tab)

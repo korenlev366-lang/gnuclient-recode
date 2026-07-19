@@ -129,6 +129,7 @@ public final class ScriptManager {
             }
         }
         loaded.clear();
+        Commands.clearAll();
 
         // 2. Ensure directories exist.
         File scriptsDir = new File(SCRIPTS_DIR);
@@ -308,11 +309,15 @@ public final class ScriptManager {
         sb.append("import gnu.client.runtime.packet.PacketEvents;\n"); line++;
         sb.append("import gnu.client.runtime.packet.PacketListener;\n"); line++;
         sb.append("import gnu.client.script.Client;\n"); line++;
+        sb.append("import gnu.client.script.Commands;\n"); line++;
+        sb.append("import gnu.client.script.Draw;\n"); line++;
+        sb.append("import gnu.client.script.Hud;\n"); line++;
         sb.append("import gnu.client.script.LenienceState;\n"); line++;
         sb.append("import gnu.client.script.Inventory;\n"); line++;
         sb.append("import gnu.client.script.Keybinds;\n"); line++;
         sb.append("import gnu.client.script.Modules;\n"); line++;
         sb.append("import gnu.client.script.Packets;\n"); line++;
+        sb.append("import gnu.client.script.Shared;\n"); line++;
         sb.append("import gnu.client.script.Status;\n"); line++;
         sb.append("import gnu.client.script.Util;\n"); line++;
         sb.append("import gnu.client.script.World;\n"); line++;
@@ -334,8 +339,12 @@ public final class ScriptManager {
         sb.append("    public static final Packets packets = Packets.INSTANCE;\n"); line++;
         sb.append("    public static final Status status = Status.INSTANCE;\n"); line++;
         sb.append("    public static final Util util = Util.INSTANCE;\n"); line++;
+        sb.append("    public static final Draw draw = Draw.INSTANCE;\n"); line++;
+        sb.append("    public static final Shared shared = Shared.INSTANCE;\n"); line++;
+        sb.append("    public static final Hud hud = Hud.INSTANCE;\n"); line++;
         sb.append("\n"); line++;
         sb.append("    final Modules modules;\n"); line++;
+        sb.append("    final Commands commands;\n"); line++;
         sb.append("    private java.lang.reflect.Method onPacketSendMethod;\n"); line++;
         sb.append("    private java.lang.reflect.Method onPacketReceiveMethod;\n"); line++;
         sb.append("    private java.lang.reflect.Method packetSendPriorityMethod;\n"); line++;
@@ -347,6 +356,7 @@ public final class ScriptManager {
         sb.append("    public ").append(className).append("() {\n"); line++;
         sb.append("        super(scriptName, \"User script: \" + scriptName, Category.SCRIPTS);\n"); line++;
         sb.append("        modules = new Modules(scriptName, this);\n"); line++;
+        sb.append("        commands = new Commands(scriptName, this);\n"); line++;
         sb.append("    }\n"); line++;
         sb.append("\n"); line++;
 
@@ -378,6 +388,7 @@ public final class ScriptManager {
         sb.append("    public void onDisable() {\n"); line++;
         sb.append("        PacketEvents.unregister(this);\n"); line++;
         sb.append("        packetEventsRegistered = false;\n"); line++;
+        sb.append("        try { commands.unregisterAll(); } catch (Throwable ignored) {}\n"); line++;
         sb.append("        invokeScript(\"onScriptDisable\");\n"); line++;
         sb.append("    }\n"); line++;
         sb.append("\n"); line++;
@@ -514,6 +525,111 @@ public final class ScriptManager {
             if (!ls.module.isEnabled())
                 continue;
             invokeScriptVoidOneArg(ls.module, ls.module.getClass(), "patchMovementInput", movInput);
+        }
+    }
+
+    /** Fan-out {@code onShared(channel, payload)} to enabled scripts. */
+    public void dispatchShared(String channel, Object payload) {
+        for (LoadedScript ls : loaded.values()) {
+            if (!ls.module.isEnabled())
+                continue;
+            invokeScriptTwoArg(ls.module, "onShared", channel, payload);
+        }
+    }
+
+    /** Fan-out {@code onAttack(entity)} after a real attack. */
+    public void dispatchAttack(Object entity) {
+        for (LoadedScript ls : loaded.values()) {
+            if (!ls.module.isEnabled())
+                continue;
+            invokeScriptVoidOneArg(ls.module, ls.module.getClass(), "onAttack", entity);
+        }
+    }
+
+    /** Fan-out {@code onStrafe(forward, strafe)}. */
+    public void dispatchStrafe(float forward, float strafe) {
+        for (LoadedScript ls : loaded.values()) {
+            if (!ls.module.isEnabled())
+                continue;
+            invokeScriptStrafe(ls.module, forward, strafe);
+        }
+    }
+
+    /** Fan-out {@code onJump()}. */
+    public void dispatchJump() {
+        for (LoadedScript ls : loaded.values()) {
+            if (!ls.module.isEnabled())
+                continue;
+            invokeUserMethod(ls.module, ls.module.getClass(), "onJump", ls.startingLine);
+        }
+    }
+
+    /**
+     * Invoke script {@code onCommand(String name, String[] args)}.
+     * Returns {@link String} reply, {@link Boolean} handled, or {@code null}.
+     */
+    public Object invokeScriptCommand(Module module, String name, String[] args) {
+        if (module == null)
+            return null;
+        try {
+            java.lang.reflect.Method target = null;
+            for (java.lang.reflect.Method m : module.getClass().getDeclaredMethods()) {
+                if (!"onCommand".equals(m.getName()) || m.getParameterCount() != 2)
+                    continue;
+                Class<?>[] p = m.getParameterTypes();
+                if (p[0] != String.class || !p[1].isArray())
+                    continue;
+                target = m;
+                break;
+            }
+            if (target == null)
+                return Boolean.TRUE; // registered but no handler — still cancel chat
+            target.setAccessible(true);
+            return target.invoke(module, name, args == null ? new String[0] : args);
+        } catch (Throwable t) {
+            GnuLog.log("JAVA_ script '" + module.getName() + "' onCommand threw: " + t);
+            return null;
+        }
+    }
+
+    private void invokeScriptTwoArg(Module module, String methodName, Object a, Object b) {
+        try {
+            java.lang.reflect.Method target = null;
+            for (java.lang.reflect.Method m : module.getClass().getDeclaredMethods()) {
+                if (m.getName().equals(methodName) && m.getParameterCount() == 2
+                        && m.getReturnType() == void.class) {
+                    target = m;
+                    break;
+                }
+            }
+            if (target == null)
+                return;
+            target.setAccessible(true);
+            target.invoke(module, a, b);
+        } catch (Throwable t) {
+            GnuLog.log("JAVA_ script '" + module.getName() + "' " + methodName + " threw: " + t);
+        }
+    }
+
+    private void invokeScriptStrafe(Module module, float forward, float strafe) {
+        try {
+            java.lang.reflect.Method target = null;
+            for (java.lang.reflect.Method m : module.getClass().getDeclaredMethods()) {
+                if (!"onStrafe".equals(m.getName()) || m.getParameterCount() != 2)
+                    continue;
+                Class<?>[] p = m.getParameterTypes();
+                if ((p[0] == float.class || p[0] == Float.class)
+                        && (p[1] == float.class || p[1] == Float.class)) {
+                    target = m;
+                    break;
+                }
+            }
+            if (target == null)
+                return;
+            target.setAccessible(true);
+            target.invoke(module, forward, strafe);
+        } catch (Throwable t) {
+            GnuLog.log("JAVA_ script '" + module.getName() + "' onStrafe threw: " + t);
         }
     }
 
