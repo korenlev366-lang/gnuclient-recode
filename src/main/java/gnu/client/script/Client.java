@@ -222,6 +222,63 @@ public final class Client {
         return Mc.attackEntity(asEntity(entity));
     }
 
+    public boolean hasScreen() {
+        return Mc.hasScreen();
+    }
+
+    public boolean isInventoryScreen() {
+        return Mc.isInventoryScreen();
+    }
+
+    public Object getCurrentScreen() {
+        return Mc.currentScreen();
+    }
+
+    public void rememberServer() {
+        Mc.rememberServer();
+    }
+
+    public boolean hasLastServer() {
+        return Mc.hasLastServer();
+    }
+
+    public String getLastServerIp() {
+        return Mc.getLastServerIp();
+    }
+
+    public boolean reconnectToLastServer() {
+        return Mc.reconnectToLastServer();
+    }
+
+    /** Block pos {x,y,z} from eye raycast, or {@code null}. */
+    public int[] raycastBlockPos(double distance, float yaw, float pitch) {
+        return Mc.raycastBlockPos(distance, yaw, pitch);
+    }
+
+    public boolean raycastHitBlock(Object mop) {
+        return mop instanceof MovingObjectPosition
+                && ((MovingObjectPosition) mop).typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK;
+    }
+
+    public void sendConfirmTransaction(int windowId, short uid, boolean accepted) {
+        Mc.sendConfirmTransaction(windowId, uid, accepted);
+    }
+
+    /**
+     * Send a C07 dig packet. {@code actionName} is an enum name such as
+     * {@code START_DESTROY_BLOCK}, {@code STOP_DESTROY_BLOCK}, {@code RELEASE_USE_ITEM}.
+     */
+    public void sendDig(String actionName, int x, int y, int z, int face) {
+        if (actionName == null)
+            return;
+        try {
+            net.minecraft.network.play.client.C07PacketPlayerDigging.Action action =
+                    net.minecraft.network.play.client.C07PacketPlayerDigging.Action.valueOf(actionName);
+            Mc.sendDig(action, x, y, z, face);
+        } catch (IllegalArgumentException ignored) {
+        }
+    }
+
     private static Entity asEntity(Object entity) {
         return entity instanceof Entity ? (Entity) entity : null;
     }
