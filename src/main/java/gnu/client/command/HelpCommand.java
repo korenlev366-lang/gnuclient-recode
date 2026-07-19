@@ -21,7 +21,8 @@ public final class HelpCommand {
     public static String help() {
         return "GNUClient commands:\n"
                 + ".config save [name] | load <name> | export <name> | import <name> | list | current | folder | default\n"
-                + ".bind <module> <key> | .bind list | key=none to unbind";
+                + ".bind <module> <key> | .bind list | key=none to unbind\n"
+                + "script commands: enable a Scripts module that registered .name (see scripts/)";
     }
 
     private static String matchPrefix(String message) {

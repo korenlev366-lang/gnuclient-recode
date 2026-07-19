@@ -135,11 +135,19 @@ public final class ClientEventListener {
     public void onStrafe(StrafeEvent event) {
         VelocityModule.patchStrafe(event);
         DisplaceModule.patchStrafe(event);
+        try {
+            ScriptManager.instance().dispatchStrafe(event.getForward(), event.getStrafe());
+        } catch (Throwable ignored) {
+        }
     }
 
     @SubscribeEvent
     public void onJump(JumpEvent event) {
         VelocityModule.patchJump(event);
+        try {
+            ScriptManager.instance().dispatchJump();
+        } catch (Throwable ignored) {
+        }
     }
 
     @SubscribeEvent
@@ -148,6 +156,11 @@ public final class ClientEventListener {
             return;
         // Single notify path — CombatAttackNotify dedupes vs KillAura noteAttack.
         CombatAttackNotify.onForgeAttack(event.target);
+
+        try {
+            ScriptManager.instance().dispatchAttack(event.target);
+        } catch (Throwable ignored) {
+        }
 
         Module lagrange = ModuleManager.INSTANCE.getModule("Lagrange");
         if (lagrange instanceof LagrangeModule && lagrange.isEnabled())

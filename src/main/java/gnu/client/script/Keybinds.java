@@ -1,12 +1,12 @@
 package gnu.client.script;
 
+import gnu.client.command.KeyNames;
 import gnu.client.runtime.ClientBootstrap;
 import gnu.client.runtime.mc.Mc;
+import org.lwjgl.input.Keyboard;
 
 /**
- * Script-facing {@code keybinds} accessor — stateless singleton facade over
- * {@link ClientBootstrap} (LWJGL LMB) and {@link Mc} (LWJGL RMB, vanilla
- * {@code sendUseItem}).
+ * Script-facing {@code keybinds} accessor — mouse / movement / arbitrary LWJGL keys.
  */
 public final class Keybinds {
 
@@ -57,5 +57,21 @@ public final class Keybinds {
     /** Synthesize a vanilla right-click via {@code PlayerControllerMP.sendUseItem}. */
     public boolean rightClick() {
         return Mc.sendUseItem();
+    }
+
+    /** Raw LWJGL keyboard state by key code ({@link Keyboard} constants). */
+    public boolean isKeyDown(int keyCode) {
+        if (keyCode <= 0)
+            return false;
+        try {
+            return Keyboard.isKeyDown(keyCode);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** Resolve a key name like {@code "R"} / {@code "LSHIFT"} to a key code, or {@code -1}. */
+    public int keyCode(String keyName) {
+        return KeyNames.parse(keyName);
     }
 }

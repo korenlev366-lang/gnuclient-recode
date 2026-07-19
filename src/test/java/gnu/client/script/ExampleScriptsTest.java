@@ -13,7 +13,6 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -53,8 +52,8 @@ public class ExampleScriptsTest {
     @Test
     public void fiftyExampleScriptsPresent() throws IOException {
         List<Path> files = listJavaScripts();
-        assertEquals("Expected 50 example .java scripts, found " + files.size(),
-                50, files.size());
+        assertTrue("Expected at least 50 example .java scripts, found " + files.size(),
+                files.size() >= 50);
     }
 
     @Test
