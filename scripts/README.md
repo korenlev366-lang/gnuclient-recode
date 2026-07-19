@@ -21,6 +21,18 @@ Each file becomes a module under the **Scripts** category in the ClickGUI.
 - `onOverlay` / `onRender` must be `public` to override `Module` draw hooks.
 - Singletons injected by the wrapper: `client`, `world`, `status`, `inventory`, `keybinds`, `packets`, `lenience`, `util`, `modules`, plus `Mc`.
 
+## Useful API (extended)
+
+| Area | Methods |
+|------|---------|
+| Chat | `packets.chatText`, `isChatReceive`, `chatFormattedText` |
+| PosLook | `packets.setPosLookRotation` |
+| KeepAlive | `packets.keepAliveId` / `setKeepAliveId` |
+| Transactions | `packets.transactionUid` / `setTransactionUid` |
+| Inventory | `inventory.setSlot`, `isSoup`, `equipBestArmor`, `findBestHotbarTool`, `windowClick` |
+| Client | `hasScreen`, `rememberServer`, `reconnectToLastServer`, `raycastBlockPos` |
+| World | `getBlockFromHit`, `getDigSpeed` |
+
 ## Scripts included (50)
 
 ### Combat

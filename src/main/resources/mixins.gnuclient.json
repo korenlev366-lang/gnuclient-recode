@@ -31,6 +31,11 @@
     "accessors.IAccessorC0CPacketInput",
     "accessors.IAccessorNetworkPlayerInfo",
     "accessors.IAccessorS19PacketEntityStatus",
-    "accessors.IAccessorC02PacketUseEntity"
+    "accessors.IAccessorC02PacketUseEntity",
+    "accessors.IAccessorS08PacketPlayerPosLook",
+    "accessors.IAccessorC00PacketKeepAlive",
+    "accessors.IAccessorS00PacketKeepAlive",
+    "accessors.IAccessorC0FPacketConfirmTransaction",
+    "accessors.IAccessorS32PacketConfirmTransaction"
   ]
 }

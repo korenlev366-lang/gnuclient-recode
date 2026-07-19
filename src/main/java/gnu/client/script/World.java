@@ -42,6 +42,25 @@ public final class World {
         return nearest;
     }
 
+    /** Block from a MovingObjectPosition hit, or {@code null}. */
+    public Object getBlockFromHit(Object mop) {
+        if (!(mop instanceof net.minecraft.util.MovingObjectPosition))
+            return null;
+        return Mc.getBlockFromHit((net.minecraft.util.MovingObjectPosition) mop);
+    }
+
+    /** Dig speed for {@code stack} against {@code blockOrState}. */
+    public float getDigSpeed(Object stack, Object blockOrState) {
+        net.minecraft.item.ItemStack itemStack =
+                stack instanceof net.minecraft.item.ItemStack ? (net.minecraft.item.ItemStack) stack : null;
+        net.minecraft.block.Block block = null;
+        if (blockOrState instanceof net.minecraft.block.Block)
+            block = (net.minecraft.block.Block) blockOrState;
+        else if (blockOrState instanceof net.minecraft.block.state.IBlockState)
+            block = ((net.minecraft.block.state.IBlockState) blockOrState).getBlock();
+        return Mc.getDigSpeed(itemStack, block);
+    }
+
     private static Entity asEntity(Object entity) {
         return entity instanceof Entity ? (Entity) entity : null;
     }

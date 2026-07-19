@@ -9,6 +9,7 @@ boolean onPacketReceive(Object packet) {
         double y = packets.posLookY(packet);
         double z = packets.posLookZ(packet);
         client.setPlayerPosition(x, y, z);
+        packets.setPosLookRotation(packet, client.getYaw(), client.getPitch());
     }
     return false;
 }

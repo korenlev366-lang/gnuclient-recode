@@ -6,9 +6,9 @@ void onPreUpdate() {
     if (status.getHealth() > modules.getSlider("Health")) return;
     for (int i = 0; i < 9; i++) {
         Object stack = inventory.getStackInSlot(i);
-        if (stack != null && stack.toString().toLowerCase().contains("soup")) {
+        if (inventory.isSoup(stack)) {
             if (inventory.getSlot() != i) {
-                Mc.setHotbarSlot(Mc.player(), i);
+                inventory.setSlot(i);
             }
             keybinds.rightClick();
             break;

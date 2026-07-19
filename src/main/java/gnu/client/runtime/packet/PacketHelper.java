@@ -1,10 +1,15 @@
 package gnu.client.runtime.packet;
 
+import gnu.client.mixin.impl.accessors.IAccessorC00PacketKeepAlive;
 import gnu.client.mixin.impl.accessors.IAccessorC03PacketPlayer;
 import gnu.client.mixin.impl.accessors.IAccessorC0CPacketInput;
+import gnu.client.mixin.impl.accessors.IAccessorC0FPacketConfirmTransaction;
+import gnu.client.mixin.impl.accessors.IAccessorS00PacketKeepAlive;
+import gnu.client.mixin.impl.accessors.IAccessorS08PacketPlayerPosLook;
 import gnu.client.mixin.impl.accessors.IAccessorS12PacketEntityVelocity;
 import gnu.client.mixin.impl.accessors.IAccessorS19PacketEntityStatus;
 import gnu.client.mixin.impl.accessors.IAccessorS27PacketExplosion;
+import gnu.client.mixin.impl.accessors.IAccessorS32PacketConfirmTransaction;
 import gnu.client.runtime.mc.Mc;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.entity.Entity;
@@ -37,6 +42,7 @@ import net.minecraft.network.play.server.S19PacketEntityStatus;
 import net.minecraft.network.play.server.S1CPacketEntityMetadata;
 import net.minecraft.network.play.server.S27PacketExplosion;
 import net.minecraft.network.play.server.S29PacketSoundEffect;
+import net.minecraft.network.play.server.S2CPacketSpawnGlobalEntity;
 import net.minecraft.network.play.server.S32PacketConfirmTransaction;
 import net.minecraft.network.play.server.S40PacketDisconnect;
 import net.minecraft.world.World;
@@ -833,13 +839,183 @@ public final class PacketHelper {
     }
 
     /**
-     * Chat text from outbound {@code C01PacketChatMessage}.
-     * stable_22: {@code field_149440_a} message, {@code func_149439_c} getMessage.
+     * Chat text from outbound {@code C01PacketChatMessage} or inbound {@code S02PacketChat}
+     * (unformatted). Returns {@code null} when not a chat packet.
      */
     public static String chatMessage(Object packet) {
-        if (!(packet instanceof C01PacketChatMessage))
+        if (packet instanceof C01PacketChatMessage)
+            return ((C01PacketChatMessage) packet).getMessage();
+        if (packet instanceof S02PacketChat) {
+            S02PacketChat chat = (S02PacketChat) packet;
+            if (chat.getChatComponent() == null)
+                return null;
+            return chat.getChatComponent().getUnformattedText();
+        }
+        return null;
+    }
+
+    /** Inbound {@code S02PacketChat} only. */
+    public static boolean isChatReceive(Object packet) {
+        return packet instanceof S02PacketChat
+                || classNameContains(packet, "S02PacketChat");
+    }
+
+    /** Formatted inbound chat text, or {@code null}. */
+    public static String chatFormattedText(Object packet) {
+        if (!(packet instanceof S02PacketChat))
             return null;
-        return ((C01PacketChatMessage) packet).getMessage();
+        S02PacketChat chat = (S02PacketChat) packet;
+        if (chat.getChatComponent() == null)
+            return null;
+        return chat.getChatComponent().getFormattedText();
+    }
+
+    /** S02 chat type byte, or {@code -1}. */
+    public static byte chatType(Object packet) {
+        if (!(packet instanceof S02PacketChat))
+            return -1;
+        return ((S02PacketChat) packet).getType();
+    }
+
+    public static void posLookSetYaw(Object packet, float yaw) {
+        if (!(packet instanceof S08PacketPlayerPosLook))
+            return;
+        try {
+            ((IAccessorS08PacketPlayerPosLook) packet).setYaw(yaw);
+        } catch (ClassCastException e) {
+            setFloatField(packet, "yaw", yaw);
+        }
+    }
+
+    public static void posLookSetPitch(Object packet, float pitch) {
+        if (!(packet instanceof S08PacketPlayerPosLook))
+            return;
+        try {
+            ((IAccessorS08PacketPlayerPosLook) packet).setPitch(pitch);
+        } catch (ClassCastException e) {
+            setFloatField(packet, "pitch", pitch);
+        }
+    }
+
+    public static void posLookSetRotation(Object packet, float yaw, float pitch) {
+        posLookSetYaw(packet, yaw);
+        posLookSetPitch(packet, pitch);
+    }
+
+    public static int keepAliveId(Object packet) {
+        if (packet instanceof C00PacketKeepAlive)
+            return ((C00PacketKeepAlive) packet).getKey();
+        if (packet instanceof S00PacketKeepAlive)
+            return ((S00PacketKeepAlive) packet).func_149134_c();
+        return 0;
+    }
+
+    public static void keepAliveSetId(Object packet, int id) {
+        if (packet instanceof C00PacketKeepAlive) {
+            try {
+                ((IAccessorC00PacketKeepAlive) packet).setKey(id);
+            } catch (ClassCastException e) {
+                setIntField(packet, "key", id);
+            }
+        } else if (packet instanceof S00PacketKeepAlive) {
+            try {
+                ((IAccessorS00PacketKeepAlive) packet).setId(id);
+            } catch (ClassCastException e) {
+                setIntField(packet, "id", id);
+            }
+        }
+    }
+
+    public static String entityActionName(Object packet) {
+        C0BPacketEntityAction.Action action = entityAction(packet);
+        return action == null ? "" : action.name();
+    }
+
+    public static String digActionName(Object packet) {
+        if (!(packet instanceof C07PacketPlayerDigging))
+            return "";
+        C07PacketPlayerDigging.Action status = ((C07PacketPlayerDigging) packet).getStatus();
+        return status == null ? "" : status.name();
+    }
+
+    public static int transactionWindowId(Object packet) {
+        if (packet instanceof C0FPacketConfirmTransaction)
+            return ((C0FPacketConfirmTransaction) packet).getWindowId();
+        if (packet instanceof S32PacketConfirmTransaction)
+            return ((S32PacketConfirmTransaction) packet).getWindowId();
+        return -1;
+    }
+
+    public static short transactionUid(Object packet) {
+        if (packet instanceof C0FPacketConfirmTransaction)
+            return ((C0FPacketConfirmTransaction) packet).getUid();
+        if (packet instanceof S32PacketConfirmTransaction)
+            return ((S32PacketConfirmTransaction) packet).getActionNumber();
+        return 0;
+    }
+
+    public static void transactionSetUid(Object packet, short uid) {
+        if (packet instanceof C0FPacketConfirmTransaction) {
+            try {
+                ((IAccessorC0FPacketConfirmTransaction) packet).setUid(uid);
+            } catch (ClassCastException e) {
+                setShortField(packet, "uid", uid);
+            }
+        } else if (packet instanceof S32PacketConfirmTransaction) {
+            try {
+                ((IAccessorS32PacketConfirmTransaction) packet).setActionNumber(uid);
+            } catch (ClassCastException e) {
+                setShortField(packet, "actionNumber", uid);
+            }
+        }
+    }
+
+    public static boolean transactionAccepted(Object packet) {
+        if (packet instanceof S32PacketConfirmTransaction)
+            return ((S32PacketConfirmTransaction) packet).func_148888_e();
+        if (packet instanceof C0FPacketConfirmTransaction)
+            return true;
+        return false;
+    }
+
+    public static boolean isSpawnGlobalEntity(Object packet) {
+        return packet instanceof S2CPacketSpawnGlobalEntity
+                || classNameContains(packet, "S2CPacketSpawnGlobalEntity")
+                || classNameContains(packet, "SpawnGlobalEntity");
+    }
+
+    /** Global entity type; lightning bolt is {@code 1}. */
+    public static int globalEntityType(Object packet) {
+        if (!(packet instanceof S2CPacketSpawnGlobalEntity))
+            return -1;
+        return ((S2CPacketSpawnGlobalEntity) packet).func_149053_g();
+    }
+
+    private static void setIntField(Object obj, String name, int value) {
+        try {
+            java.lang.reflect.Field f = obj.getClass().getDeclaredField(name);
+            f.setAccessible(true);
+            f.setInt(obj, value);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void setShortField(Object obj, String name, short value) {
+        try {
+            java.lang.reflect.Field f = obj.getClass().getDeclaredField(name);
+            f.setAccessible(true);
+            f.setShort(obj, value);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void setFloatField(Object obj, String name, float value) {
+        try {
+            java.lang.reflect.Field f = obj.getClass().getDeclaredField(name);
+            f.setAccessible(true);
+            f.setFloat(obj, value);
+        } catch (Throwable ignored) {
+        }
     }
 
     private static boolean classNameContains(Object packet, String fragment) {
