@@ -6,10 +6,7 @@ import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.module.modules.combat.KillAuraModule;
-import gnu.client.module.modules.combat.RavenAntiBot;
 import gnu.client.module.modules.network.KnockbackDelayModule;
-import gnu.client.runtime.CombatAttackNotify;
 import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
@@ -24,12 +21,9 @@ import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.multiplayer.WorldClient;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLivingBase;
-import net.minecraft.entity.monster.EntityMob;
-import net.minecraft.entity.passive.EntityAnimal;
-import net.minecraft.entity.passive.EntityVillager;
 import net.minecraft.entity.player.EntityPlayer;
-import net.minecraft.entity.item.EntityArmorStand;
 import net.minecraft.network.Packet;
+import net.minecraft.network.play.client.C02PacketUseEntity;
 import net.minecraft.network.play.server.S00PacketKeepAlive;
 import net.minecraft.network.play.server.S03PacketTimeUpdate;
 import net.minecraft.network.play.server.S06PacketUpdateHealth;
@@ -46,16 +40,17 @@ import net.minecraft.util.MathHelper;
 import net.minecraft.util.Vec3;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 
 /**
- * gnuclient-recode BackTrack — attack-gated activation, faithful to the original.
+ * gnuclient-recode BackTrack — attack-driven, players-only, faithful to the original.
  *
- * <p>Packets are only held within the post-attack window: BackTrack delays inbound packets
+ * <p>BackTrack tracks the entity you last attacked (from the outgoing C02 ATTACK packet) and
+ * only ever backtracks players — it never pulls KillAura's target or holds packets for mobs,
+ * animals, villagers or armor stands. Packets are only delayed within the post-attack window:
  * for {@code HurtTime} ms after the most recent hit (tracked via {@link CombatAttackNotify}),
- * and pauses while taking knockback. Simply approaching a player does nothing — it is an
- * attack aid, not a passive hold. Each hold rolls a packet delay in [MinDelay, MaxDelay]
+ * and the hold pauses while taking knockback. Simply approaching a player does nothing — it
+ * is an attack aid, not a passive hold. Each hold rolls a packet delay in [MinDelay, MaxDelay]
  * shown in the ArrayList. The target is rendered at its past position via {@code realPosX/Y/Z}
  * (RealPosAccess); the ESP draws the smooth true server position Lagrange-style.
  */
@@ -71,25 +66,30 @@ public final class BacktrackModule extends Module implements PacketListener {
      *  post-attack window). */
     private final SliderSetting hurtTime = addSetting(new SliderSetting("HurtTime", 250.0f, 0.0f, 1000.0f, 10.0f));
     private final BoolSetting esp = addSetting(new BoolSetting("Esp", true));
-    private final BoolSetting onlyWhenNeed = addSetting(new BoolSetting("OnlyWhenNeed", true));
-    private final BoolSetting player = addSetting(new BoolSetting("Player", true));
-    private final BoolSetting mob = addSetting(new BoolSetting("Mob", true));
-    private final BoolSetting animal = addSetting(new BoolSetting("Animal", true));
-    private final BoolSetting villager = addSetting(new BoolSetting("Villager", true));
-    private final BoolSetting armorStand = addSetting(new BoolSetting("ArmorStand", true));
-    private final BoolSetting onlyKillAura = addSetting(new BoolSetting("OnlyKillAura", true));
-    private final SliderSetting preAimRange = addSetting(new SliderSetting("PreAimRange", 4.0f, 0.0f, 15.0f));
     private final BoolSetting packetVelocity = addSetting(new BoolSetting("Velocity", true));
     private final BoolSetting packetVelocityExplosion = addSetting(new BoolSetting("ExplosionVelocity", true));
     private final BoolSetting packetTimeUpdate = addSetting(new BoolSetting("TimeUpdate", true));
     private final BoolSetting packetKeepAlive = addSetting(new BoolSetting("KeepAlive", true));
 
     private final List<Packet<?>> packets = new ArrayList<>();
+    /** The entity you last attacked — BackTrack only ever tracks this (players only),
+     *  mirroring the original gnuclient BackTrack's attack-packet-driven target. */
     private EntityLivingBase entity;
+    private int targetEntityId = -1;
     private boolean blockPackets;
 
     /** Per-hold delay, randomized between MinTime and MaxTime at the start of each hold. */
     private long currentDelay;
+
+    /**
+     * Timestamp of the initiating hit for the current hold. Set only when we are NOT already
+     * holding, so the post-attack window stays bounded to {@code HurtTime} after the first
+     * hit. Uses a BackTrack-private clock rather than {@link CombatAttackNotify#getLastAttackMs}
+     * because KillAura refreshes that timestamp on every attack — relying on it would extend
+     * the hold for as long as KillAura keeps hitting, freezing the target permanently until
+     * you walk out of range (which then also stops KillAura).
+     */
+    private long lastOwnAttackMs = 0L;
 
     /**
      * Live true server position of the target (plain double world coords), tracked for the
@@ -145,7 +145,9 @@ public final class BacktrackModule extends Module implements PacketListener {
         resetPackets();
         packets.clear();
         entity = null;
+        targetEntityId = -1;
         blockPackets = false;
+        lastOwnAttackMs = 0L;
         InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
     }
 
@@ -160,44 +162,38 @@ public final class BacktrackModule extends Module implements PacketListener {
             return;
         }
 
-        // Never hold while blocking/using an item — Grim scrutinizes movement/slowdown then.
-        if (Mc.isBlocking() || Mc.isUsingItem()) {
-            blockPackets = false;
-            resetPackets();
-            InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
-            entity = null;
-            return;
-        }
 
-        // Target selection: KillAura's target if it has one, else the nearest attacked-able
-        // entity (unless OnlyKillAura restricts us to KA's target).
-        if (KillAuraModule.getCurrentTarget() instanceof EntityLivingBase) {
-            entity = (EntityLivingBase) KillAuraModule.getCurrentTarget();
-        } else {
-            Object[] list = world.loadedEntityList.stream()
-                    .filter(this::canAttacked)
-                    .sorted(Comparator.comparingDouble(player::getDistanceToEntity))
-                    .toArray();
-            entity = list.length > 0 ? (EntityLivingBase) list[0] : null;
-            if (onlyKillAura.getValue())
+        // Target = the entity you last attacked (set from the outgoing C02 ATTACK packet in
+        // onSend), resolved against the current world. BackTrack tracks players only and
+        // never pulls KillAura's target — this matches the original gnuclient behavior and
+        // avoids holding packets for anything you aren't actually hitting.
+        if (entity == null || entity.isDead || entity.getEntityId() != targetEntityId
+                || Mc.world().getEntityByID(targetEntityId) != entity) {
+            entity = targetEntityId >= 0
+                    ? (EntityLivingBase) Mc.world().getEntityByID(targetEntityId)
+                    : null;
+            if (entity != null && !(entity instanceof EntityPlayer))
                 entity = null;
         }
 
         if (entity == null) {
             blockPackets = false;
             resetPackets();
+            lastOwnAttackMs = 0L;
             return;
         }
 
         long now = System.currentTimeMillis();
-        long lastAttack = CombatAttackNotify.getLastAttackMs();
 
         // Old gnuclient BackTrack activation: packets are only held within the post-attack
-        // window (HurtTime ms after the most recent hit). Outside that window we never hold,
-        // so merely approaching a player does nothing — BackTrack is an attack aid. Taking
-        // knockback (hurtTime 3..9) pauses the hold so we stop delaying the moment we're hit.
+        // window (HurtTime ms after the initiating hit). Outside that window we never hold,
+        // so merely approaching a player does nothing — BackTrack is an attack aid. The window
+        // is measured from BackTrack's own initiating-hit clock (lastOwnAttackMs), NOT from
+        // CombatAttackNotify, so KillAura's continuous attacks can't keep extending the hold
+        // and permanently freeze the target. Taking knockback (hurtTime 3..9) pauses the hold
+        // so we stop delaying the moment we're hit.
         boolean inRange = player.getDistanceToEntity(entity) < hitRange.getValue();
-        boolean withinAttackWindow = now - lastAttack <= (long) (float) hurtTime.getValue();
+        boolean withinAttackWindow = now - lastOwnAttackMs <= (long) (float) hurtTime.getValue();
         boolean takingKnockback = player.hurtTime >= 3 && player.hurtTime <= 9;
 
         boolean shouldBlock = inRange && withinAttackWindow && !takingKnockback;
@@ -222,6 +218,23 @@ public final class BacktrackModule extends Module implements PacketListener {
 
     @Override
     public boolean onSend(Object packet) {
+        if (!(packet instanceof C02PacketUseEntity))
+            return false;
+        C02PacketUseEntity use = (C02PacketUseEntity) packet;
+        if (use.getAction() != C02PacketUseEntity.Action.ATTACK)
+            return false;
+        // Record the attacked player as BackTrack's target (original gnuclient behavior:
+        // target is whoever you last hit, players only). Stamp the initiating-hit clock so the
+        // post-attack hold window opens even for manual clicks with KillAura off. Only stamp
+        // when we're not already holding, so continuous clicking (or KillAura's repeated hits)
+        // can't extend the hold forever — it stays bounded to HurtTime after the initiating hit.
+        Entity attacked = use.getEntityFromWorld(Mc.world());
+        if (attacked instanceof EntityPlayer) {
+            entity = (EntityLivingBase) attacked;
+            targetEntityId = attacked.getEntityId();
+            if (!blockPackets)
+                lastOwnAttackMs = System.currentTimeMillis();
+        }
         return false;
     }
 
@@ -288,7 +301,7 @@ public final class BacktrackModule extends Module implements PacketListener {
             return false;
         }
 
-        if (blockPackets && delayPackets(packet)) {
+        if (blockPackets && shouldQueue(packet)) {
             packets.add((Packet<?>) packet);
             return true;
         }
@@ -371,47 +384,28 @@ public final class BacktrackModule extends Module implements PacketListener {
         return from + (to - from) * t;
     }
 
-    private boolean canAttacked(Entity entity) {
-        if (!(entity instanceof EntityLivingBase))
-            return false;
-        EntityLivingBase elb = (EntityLivingBase) entity;
-        if (entity.isInvisible())
-            return false;
-        if (elb.deathTime > 1)
-            return false;
-        if (entity instanceof EntityArmorStand && !armorStand.getValue())
-            return false;
-        if (entity instanceof EntityAnimal && !animal.getValue())
-            return false;
-        if (entity instanceof EntityMob && !mob.getValue())
-            return false;
-        if (entity instanceof EntityPlayer && !player.getValue())
-            return false;
-        if (entity instanceof EntityVillager && !villager.getValue())
-            return false;
-        if (entity.ticksExisted < 50)
-            return false;
-        if (entity instanceof EntityPlayer && RavenAntiBot.isBot((EntityPlayer) entity))
-            return false;
-        if (entity.isDead)
-            return false;
-        EntityPlayerSP p = Mc.player();
-        return p != null && !(entity == p) && p.getDistanceToEntity(entity) < preAimRange.getValue();
-    }
-
-    private boolean delayPackets(Object packet) {
+    /** Whether a packet should be queued this hold. Only the target's movement/velocity and
+     *  a few global packets are delayed — never other entities' movement, so nearby players
+     *  (and KillAura's other candidates) keep updating and target selection isn't frozen. */
+    private boolean shouldQueue(Object packet) {
         // Never hold transactions — delaying S32 confirmations desyncs transaction-based
         // anti-cheats and causes skipped/flagged packets (Post/Pre attack verification).
         if (PacketHelper.isServerConfirmTransaction(packet))
             return false;
+        // The target's own movement (S14/S18) is what we backtrack.
+        if (targetEntityId >= 0 && PacketHelper.isBacktrackQueueCandidate(packet, targetEntityId, Mc.world()))
+            return true;
+        // Global packets (time/keepalive/explosion) are safe to delay for everyone.
         if (packet instanceof S03PacketTimeUpdate)
             return packetTimeUpdate.getValue();
         if (packet instanceof S00PacketKeepAlive)
             return packetKeepAlive.getValue();
-        if (packet instanceof S12PacketEntityVelocity)
-            return packetVelocity.getValue();
         if (packet instanceof S27PacketExplosion)
             return packetVelocityExplosion.getValue();
+        // The target's velocity only — other entities' knockback must stay live.
+        if (packet instanceof S12PacketEntityVelocity)
+            return packetVelocity.getValue()
+                    && ((S12PacketEntityVelocity) packet).getEntityID() == targetEntityId;
         // Never hold swing/status-update (opcode 2) — holding it suppresses KillAura's
         // swing animation and flags the attack as Post/Pre with autoblock.
         if (packet instanceof S19PacketEntityStatus) {
