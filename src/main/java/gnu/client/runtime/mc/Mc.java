@@ -10,12 +10,19 @@ import gnu.client.module.modules.combat.RavenAntiBot;
 import gnu.client.runtime.AuraCombatPacketGuard;
 import gnu.client.runtime.ClientBootstrap;
 import gnu.client.runtime.packet.PacketUtil;
+import net.minecraft.block.Block;
+import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.gui.FontRenderer;
+import net.minecraft.client.gui.GuiMainMenu;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.ScaledResolution;
+import net.minecraft.client.gui.inventory.GuiContainer;
+import net.minecraft.client.gui.inventory.GuiInventory;
+import net.minecraft.client.multiplayer.GuiConnecting;
 import net.minecraft.client.multiplayer.PlayerControllerMP;
+import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.WorldClient;
 import net.minecraft.client.network.NetHandlerPlayClient;
 import net.minecraft.client.network.NetworkPlayerInfo;
@@ -26,11 +33,14 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.InventoryPlayer;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemArmor;
 import net.minecraft.item.ItemBlock;
 import net.minecraft.item.ItemBow;
 import net.minecraft.item.ItemBucketMilk;
 import net.minecraft.item.ItemFood;
 import net.minecraft.item.ItemPotion;
+import net.minecraft.item.ItemSoup;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.ItemSword;
 import net.minecraft.network.Packet;
@@ -39,10 +49,10 @@ import net.minecraft.network.play.client.C08PacketPlayerBlockPlacement;
 import net.minecraft.network.play.client.C09PacketHeldItemChange;
 import net.minecraft.network.play.client.C0BPacketEntityAction;
 import net.minecraft.network.play.client.C0CPacketInput;
+import net.minecraft.network.play.client.C0FPacketConfirmTransaction;
 import net.minecraft.util.BlockPos;
 import net.minecraft.util.ChatComponentText;
 import net.minecraft.util.EnumFacing;
-import net.minecraft.block.state.IBlockState;
 import net.minecraft.util.MovingObjectPosition;
 import net.minecraft.util.Timer;
 import net.minecraft.util.Vec3;
@@ -939,5 +949,225 @@ public final class Mc {
         if (max < min)
             return min;
         return min + SHARED_RANDOM.nextDouble() * (max - min);
+    }
+
+    // -------------------- script-facing inventory / reconnect helpers --------------------
+
+    private static ServerData lastServer;
+
+    public static boolean hasScreen() {
+        return currentScreen() != null;
+    }
+
+    public static boolean isInventoryScreen() {
+        GuiScreen screen = currentScreen();
+        return screen instanceof GuiInventory || screen instanceof GuiContainer;
+    }
+
+    /** Cache the current multiplayer server while connected. */
+    public static void rememberServer() {
+        ServerData current = mc().getCurrentServerData();
+        if (current == null)
+            return;
+        if (lastServer == null)
+            lastServer = new ServerData(current.serverName, current.serverIP, current.isOnLAN());
+        lastServer.copyFrom(current);
+    }
+
+    public static boolean hasLastServer() {
+        return lastServer != null && lastServer.serverIP != null && !lastServer.serverIP.isEmpty();
+    }
+
+    public static String getLastServerIp() {
+        return lastServer == null ? "" : (lastServer.serverIP == null ? "" : lastServer.serverIP);
+    }
+
+    /** Open the connecting screen for the last remembered server. */
+    public static boolean reconnectToLastServer() {
+        if (!hasLastServer())
+            return false;
+        Minecraft minecraft = mc();
+        minecraft.displayGuiScreen(new GuiConnecting(new GuiMainMenu(), minecraft, lastServer));
+        return true;
+    }
+
+    public static boolean isSoup(ItemStack stack) {
+        return stack != null && stack.getItem() instanceof ItemSoup;
+    }
+
+    public static boolean isFood(ItemStack stack) {
+        return stack != null && stack.getItem() instanceof ItemFood;
+    }
+
+    public static boolean isArmor(ItemStack stack) {
+        return stack != null && stack.getItem() instanceof ItemArmor;
+    }
+
+    public static String getItemName(ItemStack stack) {
+        if (stack == null || stack.getItem() == null)
+            return "";
+        try {
+            return stack.getDisplayName();
+        } catch (Throwable t) {
+            return stack.getItem().getUnlocalizedName();
+        }
+    }
+
+    /**
+     * Armor inventory index 0=boots … 3=helmet, matching {@link InventoryPlayer#armorInventory}.
+     */
+    public static ItemStack getArmorStack(int armorSlot) {
+        EntityPlayerSP player = player();
+        if (player == null || player.inventory == null || armorSlot < 0 || armorSlot > 3)
+            return null;
+        return player.inventory.armorItemInSlot(armorSlot);
+    }
+
+    public static int getArmorValue(ItemStack stack) {
+        if (!isArmor(stack))
+            return -1;
+        return ((ItemArmor) stack.getItem()).damageReduceAmount;
+    }
+
+    /** ItemArmor.armorType: 0=helmet, 1=chest, 2=legs, 3=boots. */
+    public static int getArmorType(ItemStack stack) {
+        if (!isArmor(stack))
+            return -1;
+        return ((ItemArmor) stack.getItem()).armorType;
+    }
+
+    public static boolean windowClick(int windowId, int slotId, int button, int mode) {
+        EntityPlayerSP player = player();
+        PlayerControllerMP controller = controller();
+        if (player == null || controller == null)
+            return false;
+        controller.windowClick(windowId, slotId, button, mode, player);
+        return true;
+    }
+
+    public static boolean clickPlayerSlot(int containerSlot, int button, int mode) {
+        EntityPlayerSP player = player();
+        if (player == null || player.openContainer == null)
+            return false;
+        return windowClick(player.openContainer.windowId, containerSlot, button, mode);
+    }
+
+    /**
+     * Map InventoryPlayer index (0–35 main/hotbar, 36–39 armor boots→helmet)
+     * to ContainerPlayer slot ids while the player inventory is open.
+     */
+    public static int inventoryToContainerSlot(int invSlot) {
+        if (invSlot >= 0 && invSlot <= 8)
+            return 36 + invSlot; // hotbar
+        if (invSlot >= 9 && invSlot <= 35)
+            return invSlot; // main
+        if (invSlot >= 36 && invSlot <= 39) {
+            int armorInv = invSlot - 36; // 0 boots .. 3 helmet
+            return 8 - armorInv; // container 8 boots .. 5 helmet
+        }
+        return -1;
+    }
+
+    /** Container armor slot for ItemArmor.armorType (0 helmet → slot 5 … 3 boots → slot 8). */
+    public static int armorContainerSlot(int armorType) {
+        if (armorType < 0 || armorType > 3)
+            return -1;
+        return 5 + armorType;
+    }
+
+    /**
+     * Equip the best available armor from main inventory into empty/worse slots.
+     * Uses shift-click (mode 1) when the player inventory container is open; otherwise
+     * opens nothing — caller should open inventory or use while already in GuiInventory.
+     * Works with the default player container even without a GUI open.
+     */
+    public static int equipBestArmor() {
+        EntityPlayerSP player = player();
+        if (player == null || player.inventory == null || player.openContainer == null)
+            return 0;
+        int equipped = 0;
+        for (int armorType = 0; armorType <= 3; armorType++) {
+            int bestInvSlot = -1;
+            int bestValue = -1;
+            for (int i = 0; i < 36; i++) {
+                ItemStack stack = player.inventory.getStackInSlot(i);
+                if (!isArmor(stack) || getArmorType(stack) != armorType)
+                    continue;
+                int value = getArmorValue(stack);
+                if (value > bestValue) {
+                    bestValue = value;
+                    bestInvSlot = i;
+                }
+            }
+            if (bestInvSlot < 0)
+                continue;
+            int armorInvIndex = 3 - armorType; // boots=0 … helmet=3
+            ItemStack worn = player.inventory.armorItemInSlot(armorInvIndex);
+            int wornValue = getArmorValue(worn);
+            if (bestValue <= wornValue)
+                continue;
+            int fromSlot = inventoryToContainerSlot(bestInvSlot);
+            if (fromSlot < 0)
+                continue;
+            // Shift-click moves armor into the matching armor slot when possible.
+            if (clickPlayerSlot(fromSlot, 0, 1))
+                equipped++;
+        }
+        return equipped;
+    }
+
+    public static Block getBlockFromHit(MovingObjectPosition mop) {
+        if (mop == null || mop.typeOfHit != MovingObjectPosition.MovingObjectType.BLOCK)
+            return null;
+        BlockPos pos = mop.getBlockPos();
+        World w = world();
+        if (pos == null || w == null)
+            return null;
+        IBlockState state = w.getBlockState(pos);
+        return state == null ? null : state.getBlock();
+    }
+
+    public static int[] raycastBlockPos(double distance, float yaw, float pitch) {
+        MovingObjectPosition hit = raycastBlocks(distance, yaw, pitch);
+        if (hit == null || hit.typeOfHit != MovingObjectPosition.MovingObjectType.BLOCK
+                || hit.getBlockPos() == null)
+            return null;
+        BlockPos pos = hit.getBlockPos();
+        return new int[] { pos.getX(), pos.getY(), pos.getZ() };
+    }
+
+    public static float getDigSpeed(ItemStack stack, Block block) {
+        if (block == null)
+            return 0f;
+        return gnu.client.utility.BlockUtils.getBlockHardness(block, stack, false, false);
+    }
+
+    /** Best hotbar slot (0–8) for digging {@code block}, or {@code -1}. */
+    public static int findBestHotbarTool(Block block) {
+        EntityPlayerSP player = player();
+        if (player == null || player.inventory == null || block == null)
+            return -1;
+        int bestSlot = -1;
+        float best = -1f;
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = player.inventory.getStackInSlot(i);
+            float speed = getDigSpeed(stack, block);
+            if (speed > best) {
+                best = speed;
+                bestSlot = i;
+            }
+        }
+        return bestSlot;
+    }
+
+    public static void sendConfirmTransaction(int windowId, short uid, boolean accepted) {
+        addToSendQueue(new C0FPacketConfirmTransaction(windowId, uid, accepted));
+    }
+
+    public static void sendDig(C07PacketPlayerDigging.Action action, int x, int y, int z, int faceOrdinal) {
+        if (action == null)
+            return;
+        EnumFacing face = EnumFacing.VALUES[Math.max(0, Math.min(faceOrdinal, EnumFacing.VALUES.length - 1))];
+        addToSendQueue(new C07PacketPlayerDigging(action, new BlockPos(x, y, z), face));
     }
 }

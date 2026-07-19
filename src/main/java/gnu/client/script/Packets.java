@@ -252,4 +252,84 @@ public final class Packets {
     public void processInbound(Object packet) {
         PacketUtil.processInbound(packet);
     }
+
+    public boolean isChatReceive(Object packet) {
+        return PacketHelper.isChatReceive(packet);
+    }
+
+    public String chatText(Object packet) {
+        return PacketHelper.chatMessage(packet);
+    }
+
+    public String chatFormattedText(Object packet) {
+        return PacketHelper.chatFormattedText(packet);
+    }
+
+    public byte chatType(Object packet) {
+        return PacketHelper.chatType(packet);
+    }
+
+    public void setPosLookYaw(Object packet, float yaw) {
+        PacketHelper.posLookSetYaw(packet, yaw);
+    }
+
+    public void setPosLookPitch(Object packet, float pitch) {
+        PacketHelper.posLookSetPitch(packet, pitch);
+    }
+
+    public void setPosLookRotation(Object packet, float yaw, float pitch) {
+        PacketHelper.posLookSetRotation(packet, yaw, pitch);
+    }
+
+    public int keepAliveId(Object packet) {
+        return PacketHelper.keepAliveId(packet);
+    }
+
+    public void setKeepAliveId(Object packet, int id) {
+        PacketHelper.keepAliveSetId(packet, id);
+    }
+
+    public boolean isSprintEntityAction(Object packet) {
+        return PacketHelper.isSprintEntityAction(packet);
+    }
+
+    public boolean isStartSprintEntityAction(Object packet) {
+        return PacketHelper.isStartSprintEntityAction(packet);
+    }
+
+    public boolean isSneakEntityAction(Object packet) {
+        return PacketHelper.isSneakEntityAction(packet);
+    }
+
+    public String entityActionName(Object packet) {
+        return PacketHelper.entityActionName(packet);
+    }
+
+    public String digActionName(Object packet) {
+        return PacketHelper.digActionName(packet);
+    }
+
+    public int transactionWindowId(Object packet) {
+        return PacketHelper.transactionWindowId(packet);
+    }
+
+    public short transactionUid(Object packet) {
+        return PacketHelper.transactionUid(packet);
+    }
+
+    public void setTransactionUid(Object packet, short uid) {
+        PacketHelper.transactionSetUid(packet, uid);
+    }
+
+    public boolean transactionAccepted(Object packet) {
+        return PacketHelper.transactionAccepted(packet);
+    }
+
+    public boolean isSpawnGlobalEntity(Object packet) {
+        return PacketHelper.isSpawnGlobalEntity(packet);
+    }
+
+    public int globalEntityType(Object packet) {
+        return PacketHelper.globalEntityType(packet);
+    }
 }

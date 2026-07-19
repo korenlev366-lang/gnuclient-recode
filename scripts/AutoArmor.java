@@ -1,0 +1,3 @@
+void onPreUpdate() {
+    inventory.equipBestArmor();
+}

@@ -126,6 +126,18 @@ public final class Status {
         return Mc.isInWater(asEntity(entity));
     }
 
+    public boolean isSoup(Object stack) {
+        return Mc.isSoup(asStack(stack));
+    }
+
+    public boolean isFood(Object stack) {
+        return Mc.isFood(asStack(stack));
+    }
+
+    public String getItemName(Object stack) {
+        return Mc.getItemName(asStack(stack));
+    }
+
     private static Entity asEntity(Object entity) {
         return entity instanceof Entity ? (Entity) entity : null;
     }
@@ -136,5 +148,9 @@ public final class Status {
 
     private static EntityPlayer asPlayer(Object player) {
         return player instanceof EntityPlayer ? (EntityPlayer) player : null;
+    }
+
+    private static ItemStack asStack(Object stack) {
+        return stack instanceof ItemStack ? (ItemStack) stack : null;
     }
 }
