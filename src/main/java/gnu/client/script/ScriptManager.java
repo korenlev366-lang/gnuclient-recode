@@ -279,10 +279,17 @@ public final class ScriptManager {
      *
      * <p>User-facing hooks:
      * <ul>
-     *   <li>{@code onLoad()} — called once by ScriptManager at registration</li>
-     *   <li>{@code onPreUpdate()} — called per tick from generated {@code onTick}</li>
+     *   <li>{@code onLoad()} — called once by ScriptManager at registration;
+     *       register settings ({@code modules.register*}) here</li>
+     *   <li>{@code onPreUpdate()} — early tick via generated {@code onTickStart}</li>
+     *   <li>{@code onPostUpdate()} — late tick via generated {@code onTick}</li>
      *   <li>{@code onScriptDisable()} — called on disable from generated {@code onDisable}
      *       (NOT {@code onDisable} — that name collides with the Module override)</li>
+     *   <li>{@code public void onOverlay(Object)} / {@code public void onRender(float)} —
+     *       must be {@code public} so they override {@link Module} draw hooks
+     *       (ModuleManager dispatches these directly; not reflection)</li>
+     *   <li>{@code onPacketSend}/{@code onPacketReceive}, {@code itemUseSlowTarget},
+     *       {@code patchMovementInput} — discovered reflectively</li>
      * </ul>
      */
     private GeneratedSource generateWrapper(String className, String safeName, String userBody) {
