@@ -33,6 +33,7 @@ public final class UiKit {
     public static final int LINE = 0x13FFFFFF;
     public static final int TEXT = 0xFFF5F6FA;
     public static final int MUTED = 0xFF969CAB;
+    public static final int MUTED_DIM = 0xFF5A606E;
     public static final int ACCENT = 0xFF8B5CF6;
     public static final int ACCENT_2 = 0xFF5F8CFF;
     public static final int SUCCESS = 0xFF57D7A0;
@@ -342,6 +343,11 @@ public final class UiKit {
         private GlGuard() {
         }
 
+        // Render-thread-local reusable scratch (GL calls here are single-threaded).
+        private static final IntBuffer VIEWPORT_BUF = BufferUtils.createIntBuffer(16);
+        private static final IntBuffer SCISSOR_BUF = BufferUtils.createIntBuffer(16);
+        private static final FloatBuffer COLOR_BUF = BufferUtils.createFloatBuffer(16);
+
         public static void run(Runnable body) {
             boolean blend = GL11.glIsEnabled(GL11.GL_BLEND);
             boolean texture = GL11.glIsEnabled(GL11.GL_TEXTURE_2D);
@@ -353,7 +359,6 @@ public final class UiKit {
             int textureBinding = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
             int activeTexture = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
             int program = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
-            int matrixMode = GL11.glGetInteger(GL11.GL_MATRIX_MODE);
             // GL_FRAMEBUFFER_BINDING (0x8CA6) — same value for EXT/ARB/core.
             // Track binding whenever the extension exists: UiBlur uses private FBOs even
             // when video-settings "Use FBOs" (isFramebufferEnabled) is off.
@@ -363,12 +368,12 @@ public final class UiKit {
                 fbo = GL11.glGetInteger(GL_FRAMEBUFFER_BINDING);
             }
 
-            IntBuffer viewport = BufferUtils.createIntBuffer(16);
-            GL11.glGetInteger(GL11.GL_VIEWPORT, viewport);
-            IntBuffer scissorBox = BufferUtils.createIntBuffer(16);
-            GL11.glGetInteger(GL11.GL_SCISSOR_BOX, scissorBox);
-            FloatBuffer color = BufferUtils.createFloatBuffer(16);
-            GL11.glGetFloat(GL11.GL_CURRENT_COLOR, color);
+            VIEWPORT_BUF.clear();
+            GL11.glGetInteger(GL11.GL_VIEWPORT, VIEWPORT_BUF);
+            SCISSOR_BUF.clear();
+            GL11.glGetInteger(GL11.GL_SCISSOR_BOX, SCISSOR_BUF);
+            COLOR_BUF.clear();
+            GL11.glGetFloat(GL11.GL_CURRENT_COLOR, COLOR_BUF);
 
             GL11.glMatrixMode(GL11.GL_PROJECTION);
             GL11.glPushMatrix();
@@ -382,12 +387,12 @@ public final class UiKit {
                 GL11.glPopMatrix();
                 GL11.glMatrixMode(GL11.GL_PROJECTION);
                 GL11.glPopMatrix();
-                GL11.glMatrixMode(matrixMode);
+                GL11.glMatrixMode(GL11.GL_MODELVIEW);
 
                 if (OpenGlHelper.framebufferSupported) {
                     OpenGlHelper.glBindFramebuffer(OpenGlHelper.GL_FRAMEBUFFER, fbo);
                 }
-                GL11.glViewport(viewport.get(0), viewport.get(1), viewport.get(2), viewport.get(3));
+                GL11.glViewport(VIEWPORT_BUF.get(0), VIEWPORT_BUF.get(1), VIEWPORT_BUF.get(2), VIEWPORT_BUF.get(3));
 
                 GL20.glUseProgram(program);
                 GL13.glActiveTexture(activeTexture);
@@ -404,7 +409,7 @@ public final class UiKit {
                     GL11.glDisable(GL11.GL_BLEND);
                 }
                 GL11.glBlendFunc(blendSrc, blendDst);
-                GL11.glColor4f(color.get(0), color.get(1), color.get(2), color.get(3));
+                GL11.glColor4f(COLOR_BUF.get(0), COLOR_BUF.get(1), COLOR_BUF.get(2), COLOR_BUF.get(3));
 
                 if (depth) {
                     GL11.glEnable(GL11.GL_DEPTH_TEST);
@@ -422,7 +427,7 @@ public final class UiKit {
                 } else {
                     GL11.glDisable(GL11.GL_SCISSOR_TEST);
                 }
-                GL11.glScissor(scissorBox.get(0), scissorBox.get(1), scissorBox.get(2), scissorBox.get(3));
+                GL11.glScissor(SCISSOR_BUF.get(0), SCISSOR_BUF.get(1), SCISSOR_BUF.get(2), SCISSOR_BUF.get(3));
 
                 GlStateManager.resetColor();
             }

@@ -114,6 +114,10 @@ public final class SettingInteraction {
 
     private boolean clickSetting(Module module, Setting<?> setting, float x, float y, float width, float height,
             int mouseX, int mouseY, int button) {
+        if (setting.isDisabled()) {
+            // Greyed/locked — swallow the click so it can't be toggled.
+            return true;
+        }
         if (setting instanceof BoolSetting) {
             if (button != 0) {
                 return true;
@@ -227,22 +231,24 @@ public final class SettingInteraction {
 
     private void renderBoolSetting(BoolSetting bool, float x, float y, float width,
             float alpha, float scale) {
+        boolean locked = bool.isDisabled();
+        int labelColor = locked ? UiKit.MUTED_DIM : UiKit.MUTED;
         float sx = UiKit.PixelAlign.snap(x + 8f, scale);
         float sy = UiKit.PixelAlign.snap(y + (BOOL_H - UiFont.height(8f)) * 0.5f, scale);
-        UiFont.draw(bool.getName(), sx, sy, 8f, UiKit.withAlpha(UiKit.MUTED, alpha));
+        UiFont.draw(bool.getName(), sx, sy, 8f, UiKit.withAlpha(labelColor, alpha));
 
         float tw = 22f;
         float th = 12f;
         float tx = x + width - 8f - tw;
         float ty = y + (BOOL_H - th) * 0.5f;
         boolean on = bool.isToggled();
-        UiKit.drawRoundedPanel(tx, ty, tw, th, th * 0.5f,
-                UiKit.withAlpha(on ? 0xFF7655DF : 0xFF333846, alpha));
-        float knob = 8f;
-        float kx = on ? tx + tw - knob - 2f : tx + 2f;
-        float ky = ty + (th - knob) * 0.5f;
-        UiKit.drawRoundedPanel(kx, ky, knob, knob, knob * 0.5f,
-                UiKit.withAlpha(on ? 0xFFFFFFFF : 0xFFA8ADBA, alpha));
+        int track = locked ? 0xFF2A2F3A : (on ? 0xFF7655DF : 0xFF333846);
+        int knob = locked ? 0xFF5A606E : (on ? 0xFFFFFFFF : 0xFFA8ADBA);
+        UiKit.drawRoundedPanel(tx, ty, tw, th, th * 0.5f, UiKit.withAlpha(track, alpha));
+        float kw = 8f;
+        float kx = on ? tx + tw - kw - 2f : tx + 2f;
+        float ky = ty + (th - kw) * 0.5f;
+        UiKit.drawRoundedPanel(kx, ky, kw, kw, kw * 0.5f, UiKit.withAlpha(knob, alpha));
     }
 
     private void renderSliderSetting(SliderSetting slider, float x, float y, float width,

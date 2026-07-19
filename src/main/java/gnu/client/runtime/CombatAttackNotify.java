@@ -5,7 +5,6 @@ import gnu.client.module.ModuleManager;
 import gnu.client.module.modules.combat.ReachModule;
 import gnu.client.module.modules.combat.MoreKBModule;
 import gnu.client.module.modules.combat.WTapModule;
-import gnu.client.module.modules.network.BacktrackModule;
 import gnu.client.runtime.mc.Mc;
 import net.minecraft.entity.Entity;
 
@@ -43,10 +42,6 @@ public final class CombatAttackNotify {
     }
 
     private static void dispatch(Object target) {
-        Module backtrack = ModuleManager.INSTANCE.getModule("Back Track");
-        if (backtrack instanceof BacktrackModule && backtrack.isEnabled())
-            ((BacktrackModule) backtrack).noteForgeAttack(target);
-
         Module wTap = ModuleManager.INSTANCE.getModule("W Tap");
         if (wTap instanceof WTapModule && wTap.isEnabled() && target instanceof Entity)
             ((WTapModule) wTap).noteForgeAttack((Entity) target);

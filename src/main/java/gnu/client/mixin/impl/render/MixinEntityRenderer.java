@@ -2,6 +2,7 @@ package gnu.client.mixin.impl.render;
 
 import gnu.client.event.PostMouseSelectionEvent;
 import gnu.client.helper.RotationHelper;
+import gnu.client.module.modules.settings.PerformanceModule;
 import gnu.client.runtime.FreeLookHook;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.EntityRenderer;
@@ -76,6 +77,57 @@ public class MixinEntityRenderer {
                 rh.endSwap(view);
             }
             rh.swappedForMouseOver = false;
+        }
+    }
+
+    /**
+     * Clear Weather: skip rain/snow rendering entirely.
+     */
+    @Inject(method = "renderRainSnow", at = @At("HEAD"), cancellable = true)
+    private void gnu$clearWeather(float partialTicks, CallbackInfo ci) {
+        if (PerformanceModule.clearWeather()) {
+            ci.cancel();
+        }
+    }
+
+    /**
+     * Skip heavy weather (rain/snow) pass while a fullscreen GUI (e.g. ClickGUI) covers the
+     * world — the world is hidden anyway, so the cost is pure waste.
+     */
+    @Inject(method = "renderRainSnow", at = @At("HEAD"), cancellable = true)
+    private void gnu$skipWeatherWhenGuiOpen(CallbackInfo ci) {
+        if (!PerformanceModule.skipWorldWhenGuiOpen())
+            return;
+        Minecraft mc = Minecraft.getMinecraft();
+        if (mc != null && mc.currentScreen != null) {
+            ci.cancel();
+        }
+    }
+
+    /**
+     * Skip cloud rendering while a fullscreen GUI covers the world — the player can't see
+     * the sky anyway, so the cloud pass is pure waste. Mirrors the weather-skip toggle.
+     * Note: the MCP method is {@code renderCloudsCheck(RenderGlobal, float, int)}, not
+     * {@code renderClouds}.
+     */
+    @Inject(method = "renderCloudsCheck", at = @At("HEAD"), cancellable = true)
+    private void gnu$skipCloudsWhenGuiOpen(CallbackInfo ci) {
+        if (!PerformanceModule.skipCloudsWhenGuiOpen())
+            return;
+        Minecraft mc = Minecraft.getMinecraft();
+        if (mc != null && mc.currentScreen != null) {
+            ci.cancel();
+        }
+    }
+
+    /**
+     * No Hurt Cam: cancel the camera shake/zoom applied when the player takes damage.
+     * Purely a view effect — no world/entity state touched, so it's safe alongside OptiFine.
+     */
+    @Inject(method = "hurtCameraEffect", at = @At("HEAD"), cancellable = true)
+    private void gnu$noHurtCam(CallbackInfo ci) {
+        if (PerformanceModule.noHurtCam()) {
+            ci.cancel();
         }
     }
 }

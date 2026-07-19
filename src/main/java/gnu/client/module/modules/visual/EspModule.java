@@ -3,12 +3,14 @@ package gnu.client.module.modules.visual;
 import gnu.client.common.GnuLog;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
+import gnu.client.module.modules.settings.PerformanceModule;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.mc.Mc;
 import gnu.client.util.EspDraw;
 import gnu.client.util.RenderHelper;
 import net.minecraft.entity.Entity;
+import org.lwjgl.opengl.GL11;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,6 +36,8 @@ public final class EspModule extends Module {
     private final BoolSetting showSelf = addSetting(new BoolSetting("Show Self", false));
 
     private final List<EntityData> cache = new ArrayList<>();
+    private final List<Entity> scratch = new ArrayList<>();
+    private float[] boxBuffer = new float[6 * 64];
     private boolean debugLogged;
 
     public EspModule() {
@@ -59,11 +63,11 @@ public final class EspModule extends Module {
             return;
 
         Entity self = Mc.player();
-        for (Entity entity : Mc.getWorldEntitiesFiltered(Mc.world())) {
+        for (Entity entity : Mc.getWorldEntitiesFilteredInto(Mc.world(), scratch)) {
             if (!showSelf.getValue() && entity == self)
                 continue;
 
-            EntityData data = new EntityData();
+            EntityData data = obtain(cache, cache.size());
             data.lastX = entity.lastTickPosX;
             data.lastY = entity.lastTickPosY;
             data.lastZ = entity.lastTickPosZ;
@@ -71,7 +75,6 @@ public final class EspModule extends Module {
             data.posY = entity.posY;
             data.posZ = entity.posZ;
             data.sneaking = entity.isSneaking();
-            cache.add(data);
         }
     }
 
@@ -99,20 +102,65 @@ public final class EspModule extends Module {
         float fg = g.getValue() / 255.0f;
         float fb = b.getValue() / 255.0f;
 
+        int n = cache.size();
         RenderHelper.begin();
-        for (EntityData data : cache) {
-            double ix = Mc.lerp(data.lastX, data.posX, partialTicks);
-            double iy = Mc.lerp(data.lastY, data.posY, partialTicks);
-            double iz = Mc.lerp(data.lastZ, data.posZ, partialTicks);
-            double rx = ix - rvpX;
-            double ry = iy - rvpY;
-            double rz = iz - rvpZ;
-            double height = data.sneaking ? 1.5 : 1.8;
-            EspDraw.fill(
-                    rx - 0.3, ry, rz - 0.3,
-                    rx + 0.3, ry + height, rz + 0.3,
-                    fr, fg, fb);
+        GL11.glColor4f(fr, fg, fb, EspDraw.DEFAULT_FILL_ALPHA);
+
+        if (PerformanceModule.boxDisplayLists()) {
+            // Tier-2: each box is a translated call into a cached display list.
+            for (int i = 0; i < n; i++) {
+                EntityData data = cache.get(i);
+                double ix = Mc.lerp(data.lastX, data.posX, partialTicks);
+                double iy = Mc.lerp(data.lastY, data.posY, partialTicks);
+                double iz = Mc.lerp(data.lastZ, data.posZ, partialTicks);
+                double rx = ix - rvpX;
+                double ry = iy - rvpY;
+                double rz = iz - rvpZ;
+                double height = data.sneaking ? 1.5 : 1.8;
+                GL11.glPushMatrix();
+                GL11.glTranslated(rx, ry + height * 0.5, rz);
+                RenderHelper.drawFilledBoxList(0.6f, (float) height, 0.6f);
+                GL11.glPopMatrix();
+            }
+        } else {
+            ensureBoxCapacity(n);
+            for (int i = 0; i < n; i++) {
+                EntityData data = cache.get(i);
+                double ix = Mc.lerp(data.lastX, data.posX, partialTicks);
+                double iy = Mc.lerp(data.lastY, data.posY, partialTicks);
+                double iz = Mc.lerp(data.lastZ, data.posZ, partialTicks);
+                double rx = ix - rvpX;
+                double ry = iy - rvpY;
+                double rz = iz - rvpZ;
+                double height = data.sneaking ? 1.5 : 1.8;
+                int o = i * 6;
+                boxBuffer[o] = (float) (rx - 0.3);
+                boxBuffer[o + 1] = (float) ry;
+                boxBuffer[o + 2] = (float) (rz - 0.3);
+                boxBuffer[o + 3] = (float) (rx + 0.3);
+                boxBuffer[o + 4] = (float) (ry + height);
+                boxBuffer[o + 5] = (float) (rz + 0.3);
+            }
+            EspDraw.fillBatched(boxBuffer, n, fr, fg, fb, 0f);
         }
+
         RenderHelper.end();
+    }
+
+    private static EntityData obtain(List<EntityData> list, int index) {
+        if (index < list.size())
+            return list.get(index);
+        EntityData data = new EntityData();
+        list.add(data);
+        return data;
+    }
+
+    private void ensureBoxCapacity(int n) {
+        if (boxBuffer.length >= n * 6)
+            return;
+        int cap = boxBuffer.length;
+        while (cap < n * 6)
+            cap <<= 1;
+        boxBuffer = new float[cap];
     }
 }

@@ -36,7 +36,7 @@ public abstract class MixinRenderManager {
     @Unique
     private boolean gnu$swapped;
 
-    @Inject(method = { "renderEntityStatic", "func_147939_a" }, at = @At("HEAD"))
+    @Inject(method = "renderEntityStatic", at = @At("HEAD"))
     private void gnu$silentRotPre(Entity entity, float partialTicks, boolean hideDebugBox,
                                   CallbackInfoReturnable<Boolean> cir) {
         gnu$swapped = false;
@@ -58,7 +58,7 @@ public abstract class MixinRenderManager {
         gnu$swapped = true;
     }
 
-    @Inject(method = { "renderEntityStatic", "func_147939_a" }, at = @At("RETURN"))
+    @Inject(method = "renderEntityStatic", at = @At("RETURN"))
     private void gnu$silentRotPost(Entity entity, float partialTicks, boolean hideDebugBox,
                                    CallbackInfoReturnable<Boolean> cir) {
         if (!gnu$swapped || !(entity instanceof EntityPlayerSP))

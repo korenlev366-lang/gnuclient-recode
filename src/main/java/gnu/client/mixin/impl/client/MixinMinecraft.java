@@ -2,9 +2,11 @@ package gnu.client.mixin.impl.client;
 
 import gnu.client.event.*;
 import gnu.client.helper.RotationHelper;
+import gnu.client.module.modules.settings.PerformanceModule;
 import gnu.client.runtime.FreeLookHook;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.renderer.OpenGlHelper;
 import net.minecraft.client.settings.GameSettings;
 import net.minecraft.entity.player.InventoryPlayer;
 import net.minecraft.util.MovingObjectPosition;
@@ -68,6 +70,92 @@ public class MixinMinecraft {
     @Inject(method = "runTick", at = @At("HEAD"))
     public void onRunTickStart(CallbackInfo ci) {
         MinecraftForge.EVENT_BUS.post(new GameTickEvent());
+    }
+
+    /**
+     * Performance: once per tick, force vanilla quality settings that are expensive.
+     * Smooth lighting is the biggest non-chunk CPU cost in block rendering; disabling it
+     * skips the per-vertex ambient-occlusion pass. Done here (not via redirects scattered
+     * across WorldRenderer/BlockModelRenderer) so the user's other settings are respected
+     * whenever the toggle is off.
+     */
+    @Inject(method = "runTick", at = @At("HEAD"))
+    public void gnu$applyPerfSettings(CallbackInfo ci) {
+        Minecraft mc = (Minecraft) (Object) this;
+        GameSettings settings = mc.gameSettings;
+        if (settings == null)
+            return;
+        if (PerformanceModule.disableSmoothLighting()) {
+            settings.ambientOcclusion = 0;
+        }
+        if (PerformanceModule.cloudsOff()) {
+            settings.clouds = 0;
+        }
+        if (PerformanceModule.fastGraphics()) {
+            settings.fancyGraphics = false;
+        }
+        if (PerformanceModule.minimalParticles()) {
+            settings.particleSetting = 2;
+        }
+        if (PerformanceModule.forceVbo() && OpenGlHelper.vboSupported) {
+            settings.useVbo = true;
+        }
+        if (PerformanceModule.entityShadowsOff()) {
+            settings.entityShadows = false;
+        }
+        if (PerformanceModule.fboOff()) {
+            settings.fboEnable = false;
+        }
+        if (PerformanceModule.viewBobbingOff()) {
+            settings.viewBobbing = false;
+        }
+        if (PerformanceModule.mipmapsOff()) {
+            settings.mipmapLevels = 0;
+        }
+        if (PerformanceModule.limitFps()) {
+            settings.enableVsync = false;
+            settings.limitFramerate = PerformanceModule.fpsCap();
+        }
+        if (PerformanceModule.reducedRenderDistance()
+                && settings.renderDistanceChunks > PerformanceModule.renderDistanceChunks()) {
+            settings.renderDistanceChunks = PerformanceModule.renderDistanceChunks();
+        }
+        if (PerformanceModule.dynamicRenderDistance()) {
+            gnu$applyDynamicRenderDistance(settings);
+        }
+    }
+
+    /**
+     * Dynamic Render Distance: adapt {@code renderDistanceChunks} to the current frame rate
+     * so the game stays responsive under load without the player manually tweaking it.
+     *
+     * <p>Hysteresis: drop one chunk when FPS is below the low threshold, raise one chunk
+     * when FPS is above the high threshold. A per-tick cooldown prevents thrashing. The
+     * configured {@code Render Distance} slider is the ceiling and {@code Dynamic RD Min}
+     * is the floor.
+     */
+    private static int gnu$dynRdCooldown = 0;
+
+    private void gnu$applyDynamicRenderDistance(GameSettings settings) {
+        if (gnu$dynRdCooldown > 0) {
+            gnu$dynRdCooldown--;
+            return;
+        }
+        int fps = Minecraft.getDebugFPS();
+        int min = PerformanceModule.dynamicRenderDistanceMin();
+        int max = PerformanceModule.renderDistanceChunks();
+        int current = settings.renderDistanceChunks;
+        if (current < min)
+            current = min;
+        if (current > max)
+            current = max;
+        if (fps < 30 && current > min) {
+            settings.renderDistanceChunks = current - 1;
+            gnu$dynRdCooldown = 40;
+        } else if (fps > 55 && current < max) {
+            settings.renderDistanceChunks = current + 1;
+            gnu$dynRdCooldown = 80;
+        }
     }
 
     @Inject(

@@ -50,6 +50,8 @@ public final class HudRenderer {
     private final NotificationQueue notifications = new NotificationQueue();
     private final Map<Module, Boolean> baselines = new IdentityHashMap<Module, Boolean>();
     private final Map<String, ArrayRow> rows = new HashMap<String, ArrayRow>();
+    private final Map<String, Module> enabledEligible = new HashMap<String, Module>();
+    private final List<ArrayRow> sortedRows = new ArrayList<ArrayRow>();
     private boolean seeded;
     private boolean pendingSilentReseed = true;
     private boolean sawLoading;
@@ -233,7 +235,8 @@ public final class HudRenderer {
     }
 
     private void reconcileArray(boolean showSuffixes, float dt) {
-        Map<String, Module> enabledEligible = new HashMap<String, Module>();
+        Map<String, Module> enabledEligible = this.enabledEligible;
+        enabledEligible.clear();
         for (Module m : ModuleManager.INSTANCE.all()) {
             if (!isArrayEligible(m) || !m.isEnabled()) {
                 continue;
@@ -279,7 +282,9 @@ public final class HudRenderer {
             row.refreshLabel(showSuffixes);
         }
 
-        List<ArrayRow> sorted = new ArrayList<ArrayRow>(rows.values());
+        List<ArrayRow> sorted = sortedRows;
+        sorted.clear();
+        sorted.addAll(rows.values());
         CollectionsSort.sortRows(sorted);
         float y = ARRAY_MARGIN;
         for (ArrayRow row : sorted) {
@@ -299,6 +304,9 @@ public final class HudRenderer {
             return false;
         }
         if (m.getCategory() == Category.SETTINGS) {
+            return false;
+        }
+        if (m.isHidden()) {
             return false;
         }
         return true;
@@ -348,7 +356,9 @@ public final class HudRenderer {
     }
 
     private void drawArrayList(int scaledWidth, float scale, boolean showSuffixes) {
-        List<ArrayRow> sorted = new ArrayList<ArrayRow>(rows.values());
+        List<ArrayRow> sorted = sortedRows;
+        sorted.clear();
+        sorted.addAll(rows.values());
         CollectionsSort.sortRows(sorted);
         float right = scaledWidth - ARRAY_MARGIN;
         for (ArrayRow row : sorted) {

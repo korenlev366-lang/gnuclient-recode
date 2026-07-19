@@ -251,17 +251,30 @@ public final class Mc {
         return new ArrayList<Entity>(w.loadedEntityList);
     }
 
-    public static List<Entity> getWorldEntitiesFiltered(World w) {
-        List<Entity> raw = getWorldEntities(w);
-        if (!AntiBotModule.isActive())
-            return raw;
-        List<Entity> filtered = new ArrayList<>();
-        for (Entity entity : raw) {
+    /**
+     * Reuse-friendly variant: fills {@code out} in place with the filtered entity list
+     * and returns it, avoiding a second per-tick allocation when bot filtering is active.
+     * {@code out} is cleared first so callers may reuse the same buffer across ticks.
+     */
+    public static List<Entity> getWorldEntitiesFilteredInto(World w, List<Entity> out) {
+        out.clear();
+        if (w == null)
+            return out;
+        if (!AntiBotModule.isActive()) {
+            out.addAll(w.loadedEntityList);
+            return out;
+        }
+        for (Entity entity : w.loadedEntityList) {
             if (RavenAntiBot.isBot(entity))
                 continue;
-            filtered.add(entity);
+            out.add(entity);
         }
-        return filtered;
+        return out;
+    }
+
+    /** Convenience copy (used by scripts / one-shot callers). */
+    public static List<Entity> getWorldEntitiesFiltered(World w) {
+        return getWorldEntitiesFilteredInto(w, new ArrayList<Entity>());
     }
 
     public static boolean isEntityPlayer(Entity entity) {

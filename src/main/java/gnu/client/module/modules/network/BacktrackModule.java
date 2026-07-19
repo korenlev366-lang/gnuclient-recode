@@ -1,809 +1,361 @@
 package gnu.client.module.modules.network;
 
+import gnu.client.mixin.RealPosAccess;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
-import gnu.client.module.ModuleManager;
 import gnu.client.module.setting.BoolSetting;
-import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
-import gnu.client.mixin.impl.accessors.IAccessorC02PacketUseEntity;
+import gnu.client.module.modules.combat.KillAuraModule;
+import gnu.client.module.modules.combat.RavenAntiBot;
+import gnu.client.module.modules.network.KnockbackDelayModule;
 import gnu.client.runtime.mc.Mc;
-import gnu.client.runtime.packet.BacktrackTargetPosition;
-import gnu.client.runtime.packet.InboundLagCoordinator;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
 import gnu.client.runtime.packet.PacketUtil;
 import gnu.client.util.EspDraw;
 import gnu.client.util.RenderHelper;
+
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.multiplayer.WorldClient;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.monster.EntityMob;
+import net.minecraft.entity.passive.EntityAnimal;
+import net.minecraft.entity.passive.EntityVillager;
 import net.minecraft.entity.player.EntityPlayer;
-import net.minecraft.item.ItemAxe;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.ItemSword;
-import net.minecraft.network.play.client.C02PacketUseEntity;
+import net.minecraft.entity.item.EntityArmorStand;
+import net.minecraft.network.Packet;
+import net.minecraft.network.play.server.S00PacketKeepAlive;
+import net.minecraft.network.play.server.S03PacketTimeUpdate;
 import net.minecraft.network.play.server.S06PacketUpdateHealth;
-import net.minecraft.network.play.server.S13PacketDestroyEntities;
+import net.minecraft.network.play.server.S08PacketPlayerPosLook;
+import net.minecraft.network.play.server.S12PacketEntityVelocity;
+import net.minecraft.network.play.server.S14PacketEntity;
+import net.minecraft.network.play.server.S18PacketEntityTeleport;
+import net.minecraft.network.play.server.S19PacketEntityStatus;
+import net.minecraft.network.play.server.S27PacketExplosion;
+import net.minecraft.network.play.server.S29PacketSoundEffect;
+import net.minecraft.network.play.server.S0CPacketSpawnPlayer;
+import net.minecraft.network.play.server.S3EPacketTeams;
+import net.minecraft.util.MathHelper;
+import net.minecraft.util.Vec3;
 
-import java.util.ArrayDeque;
-import java.util.Arrays;
-import java.util.Deque;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
- * Timewarp Back Track — settings and behavior matched to ctw.dll.
+ * Augustus b2.6 BackTrack — faithful port.
+ *
+ * <p>Holds clientbound packets in a raw list and cancels them until the geometry says
+ * "now is a good moment": when the player's eyes are closer to the target's <i>server</i>
+ * position ({@code realPos}) than its <i>rendered</i> position, within hit range, and
+ * before the configured {@code Time} delay has elapsed. The entity is rendered at its
+ * server position via {@code realPosX/Y/Z} (RealPosAccess), which are updated from
+ * every {@code S14}/{@code S18} packet.
  */
 public final class BacktrackModule extends Module implements PacketListener {
 
-    private static final List<String> MODES = Arrays.asList("Normal", "Advanced");
+    private final SliderSetting hitRange = addSetting(new SliderSetting("MaxHitRange", 6.0f, 3.0f, 6.0f));
+    private final SliderSetting timeDelay = addSetting(new SliderSetting("Time", 4000.0f, 0.0f, 30000.0f));
+    private final BoolSetting esp = addSetting(new BoolSetting("Esp", true));
+    private final BoolSetting onlyWhenNeed = addSetting(new BoolSetting("OnlyWhenNeed", true));
+    private final BoolSetting player = addSetting(new BoolSetting("Player", true));
+    private final BoolSetting mob = addSetting(new BoolSetting("Mob", true));
+    private final BoolSetting animal = addSetting(new BoolSetting("Animal", true));
+    private final BoolSetting villager = addSetting(new BoolSetting("Villager", true));
+    private final BoolSetting armorStand = addSetting(new BoolSetting("ArmorStand", true));
+    private final BoolSetting onlyKillAura = addSetting(new BoolSetting("OnlyKillAura", true));
+    private final SliderSetting preAimRange = addSetting(new SliderSetting("PreAimRange", 4.0f, 0.0f, 15.0f));
+    private final BoolSetting packetVelocity = addSetting(new BoolSetting("Velocity", true));
+    private final BoolSetting packetVelocityExplosion = addSetting(new BoolSetting("ExplosionVelocity", true));
+    private final BoolSetting packetTimeUpdate = addSetting(new BoolSetting("TimeUpdate", true));
+    private final BoolSetting packetKeepAlive = addSetting(new BoolSetting("KeepAlive", true));
 
-    private final ModeSetting mode = addSetting(new ModeSetting("Mode", 0, MODES));
-    private final SliderSetting backtrackTime = addSetting(new SliderSetting("Backtrack time", 150.0f, 0.0f, 2000.0f));
-    private final SliderSetting distanceMin = addSetting(new SliderSetting("DistanceMin", 1.0f, 0.0f, 10.0f));
-    private final SliderSetting distanceMax = addSetting(new SliderSetting("DistanceMax", 4.0f, 0.0f, 10.0f));
-    private final SliderSetting cooldown = addSetting(new SliderSetting("Cooldown", 1000.0f, 0.0f, 5000.0f));
-    private final SliderSetting chance = addSetting(new SliderSetting("Chance", 100.0f, 0.0f, 100.0f));
-    private final SliderSetting requiredHits = addSetting(new SliderSetting("Required hits", 0.0f, 0.0f, 10.0f));
-    private final SliderSetting comboThreshold = addSetting(new SliderSetting("ComboThreshold", 0.0f, 0.0f, 10.0f));
-    private final SliderSetting attackWindow = addSetting(new SliderSetting("AttackWindow", 1000.0f, 100.0f, 3000.0f));
-    private final SliderSetting hurtTime = addSetting(new SliderSetting("Hurt time", 200.0f, 0.0f, 1000.0f));
-    private final BoolSetting disableOnHit = addSetting(new BoolSetting("Disable on hit", true));
-    private final BoolSetting holdingWeapon = addSetting(new BoolSetting("Holding weapon", false));
-    private final BoolSetting useDistanceCheck = addSetting(new BoolSetting("Distance check", true));
+    private final List<Packet<?>> packets = new ArrayList<>();
+    private EntityLivingBase entity;
+    private boolean blockPackets;
+    private long blockStartMs;
 
-    private final BoolSetting enableVisuals = addSetting(new BoolSetting("Enable visuals", true));
-    private final BoolSetting renderServerRecord = addSetting(new BoolSetting("RenderServerRecord", true));
-    private final BoolSetting drawBox = addSetting(new BoolSetting("DrawBox", true));
-    private final SliderSetting boxColorR = addSetting(new SliderSetting("BoxColorR", 0.0f, 0.0f, 255.0f));
-    private final SliderSetting boxColorG = addSetting(new SliderSetting("BoxColorG", 255.0f, 0.0f, 255.0f));
-    private final SliderSetting boxColorB = addSetting(new SliderSetting("BoxColorB", 0.0f, 0.0f, 255.0f));
-    private final BoolSetting enableTrail = addSetting(new BoolSetting("EnableTrail", true));
-    private final SliderSetting trailDuration = addSetting(new SliderSetting("Trail duration", 500.0f, 100.0f, 2000.0f));
-    private final SliderSetting maxTrailPoints = addSetting(new SliderSetting("MaxTrailPoints", 20.0f, 5.0f, 50.0f));
-    private final SliderSetting trailColorR = addSetting(new SliderSetting("TrailColorR", 0.0f, 0.0f, 255.0f));
-    private final SliderSetting trailColorG = addSetting(new SliderSetting("TrailColorG", 255.0f, 0.0f, 255.0f));
-    private final SliderSetting trailColorB = addSetting(new SliderSetting("TrailColorB", 0.0f, 0.0f, 255.0f));
-    private final BoolSetting enablePulse = addSetting(new BoolSetting("EnablePulse", true));
-    private final SliderSetting pulseSpeed = addSetting(new SliderSetting("Pulse speed", 2.0f, 0.5f, 5.0f));
-    private final SliderSetting pulseMinAlpha = addSetting(new SliderSetting("Pulse min alpha", 45.0f, 0.0f, 100.0f));
-    private final SliderSetting pulseMaxAlpha = addSetting(new SliderSetting("Pulse max alpha", 100.0f, 0.0f, 100.0f));
-    private final BoolSetting enableGlow = addSetting(new BoolSetting("EnableGlow", false));
-    private final SliderSetting glowIntensity = addSetting(new SliderSetting("Glow intensity", 0.5f, 0.1f, 1.0f));
-    private final SliderSetting glowColorR = addSetting(new SliderSetting("GlowColorR", 0.0f, 0.0f, 255.0f));
-    private final SliderSetting glowColorG = addSetting(new SliderSetting("GlowColorG", 255.0f, 0.0f, 255.0f));
-    private final SliderSetting glowColorB = addSetting(new SliderSetting("GlowColorB", 0.0f, 0.0f, 255.0f));
-    private final BoolSetting enableHurt = addSetting(new BoolSetting("EnableHurt", false));
-    private final SliderSetting hurtColorR = addSetting(new SliderSetting("HurtColorR", 255.0f, 0.0f, 255.0f));
-    private final SliderSetting hurtColorG = addSetting(new SliderSetting("HurtColorG", 0.0f, 0.0f, 255.0f));
-    private final SliderSetting hurtColorB = addSetting(new SliderSetting("HurtColorB", 0.0f, 0.0f, 255.0f));
-    private final SliderSetting hurtDuration = addSetting(new SliderSetting("Hurt duration", 500.0f, 0.0f, 2000.0f));
-
-    private static final int MAX_INBOUND_RELEASE_PER_TICK = 2;
-    private static final int MAX_QUEUE_DEPTH = 16;
-    private static final long TRACKING_BUFFER_MS = 500L;
-    private static final long GHOST_INTERP_MS = 80L;
-    private static final double POS_EPS = 1.0e-6;
-    private final ConcurrentLinkedQueue<QueuedInbound> inboundQueue = new ConcurrentLinkedQueue<>();
-    private final BacktrackTargetPosition position = new BacktrackTargetPosition();
-    private final Deque<TrailPoint> serverTrail = new ArrayDeque<>();
-
-    private EntityLivingBase target;
-    private int targetEntityId = -1;
-
-    private long nextBacktrackAllowedAtMs;
-    private long trackingBufferUntilMs;
-    private long lastAttackMs;
-    private int currentDelayMs;
-    private boolean shouldPauseTarget;
-    private float rolledChance;
-    private int targetHitCount;
-    private int comboCount;
-
-    private double ghostFromX;
-    private double ghostFromY;
-    private double ghostFromZ;
-    private double ghostToX;
-    private double ghostToY;
-    private double ghostToZ;
-    private long ghostInterpStartMs;
-    private boolean ghostInterpValid;
+    /** True while inbound packets are being held (used by PingFix to keep ping in sync). */
+    public boolean isLagging() {
+        return isEnabled() && blockPackets && !packets.isEmpty();
+    }
 
     public BacktrackModule() {
         super("Back Track", "Hit players at their past position", Category.COMBAT);
-        distanceMin.visibleWhen(() -> useDistanceCheck.getValue());
-        distanceMax.visibleWhen(() -> useDistanceCheck.getValue());
-        renderServerRecord.visibleWhen(() -> enableVisuals.getValue());
-        drawBox.visibleWhen(() -> enableVisuals.getValue());
-        boxColorR.visibleWhen(() -> enableVisuals.getValue() && drawBox.getValue());
-        boxColorG.visibleWhen(() -> enableVisuals.getValue() && drawBox.getValue());
-        boxColorB.visibleWhen(() -> enableVisuals.getValue() && drawBox.getValue());
-        enableTrail.visibleWhen(() -> enableVisuals.getValue() && renderServerRecord.getValue());
-        enablePulse.visibleWhen(() -> enableVisuals.getValue());
-        enableGlow.visibleWhen(() -> enableVisuals.getValue());
-        enableHurt.visibleWhen(() -> enableVisuals.getValue());
-        trailDuration.visibleWhen(() -> enableVisuals.getValue() && renderServerRecord.getValue()
-                && enableTrail.getValue());
-        maxTrailPoints.visibleWhen(() -> enableVisuals.getValue() && renderServerRecord.getValue()
-                && enableTrail.getValue());
-        trailColorR.visibleWhen(() -> enableVisuals.getValue() && renderServerRecord.getValue()
-                && enableTrail.getValue());
-        trailColorG.visibleWhen(() -> enableVisuals.getValue() && renderServerRecord.getValue()
-                && enableTrail.getValue());
-        trailColorB.visibleWhen(() -> enableVisuals.getValue() && renderServerRecord.getValue()
-                && enableTrail.getValue());
-        pulseSpeed.visibleWhen(() -> enableVisuals.getValue() && enablePulse.getValue());
-        pulseMinAlpha.visibleWhen(() -> enableVisuals.getValue() && enablePulse.getValue());
-        pulseMaxAlpha.visibleWhen(() -> enableVisuals.getValue() && enablePulse.getValue());
-        glowIntensity.visibleWhen(() -> enableVisuals.getValue() && enableGlow.getValue());
-        glowColorR.visibleWhen(() -> enableVisuals.getValue() && enableGlow.getValue());
-        glowColorG.visibleWhen(() -> enableVisuals.getValue() && enableGlow.getValue());
-        glowColorB.visibleWhen(() -> enableVisuals.getValue() && enableGlow.getValue());
-        hurtColorR.visibleWhen(() -> enableVisuals.getValue() && enableHurt.getValue());
-        hurtColorG.visibleWhen(() -> enableVisuals.getValue() && enableHurt.getValue());
-        hurtColorB.visibleWhen(() -> enableVisuals.getValue() && enableHurt.getValue());
-        hurtDuration.visibleWhen(() -> enableVisuals.getValue() && enableHurt.getValue());
     }
 
-    public static void abortActiveLag() {
-        Module mod = ModuleManager.INSTANCE.getModule("Back Track");
-        if (mod instanceof BacktrackModule && mod.isEnabled())
-            ((BacktrackModule) mod).clear(true, false, true);
+    private static RealPosAccess realPos(EntityLivingBase entity) {
+        return (RealPosAccess) (Object) entity;
     }
 
     @Override
     public void onEnable() {
-        currentDelayMs = backtrackTime.getValue().intValue();
-        clear(false, false, true);
+        blockPackets = false;
         PacketEvents.register(this);
+        WorldClient world = Mc.world();
+        EntityPlayerSP player = Mc.player();
+        if (world != null && player != null) {
+            for (Entity e : world.loadedEntityList) {
+                if (e instanceof EntityLivingBase) {
+                    EntityLivingBase elb = (EntityLivingBase) e;
+                    RealPosAccess rp = realPos(elb);
+                    rp.setRealPosX(elb.serverPosX);
+                    rp.setRealPosY(elb.serverPosY);
+                    rp.setRealPosZ(elb.serverPosZ);
+                }
+            }
+        }
     }
 
     @Override
     public void onDisable() {
         PacketEvents.unregister(this);
-        clear(true, false, true);
+        resetPackets();
+        packets.clear();
+        entity = null;
+        blockPackets = false;
     }
 
     @Override
     public void onTick() {
-        if (!isEnabled())
-            return;
         EntityPlayerSP player = Mc.player();
         WorldClient world = Mc.world();
         if (player == null || world == null) {
-            clear(false, true, true);
-            return;
-        }
-        if (Mc.currentScreen() != null) {
-            clear(false, true, true);
-            return;
-        }
-
-        refreshAttackTarget(player);
-
-        if (KnockbackDelayModule.isOwningInboundQueue()) {
-            if (hasQueuedIncoming())
-                clear(true, false, false);
+            resetPackets();
+            entity = null;
+            blockPackets = false;
             return;
         }
 
-        boolean hadQueued = hasQueuedIncoming();
-        if (shouldCancelPackets()) {
-            flushExpired(System.currentTimeMillis());
-            if (isLagging())
-                recordTrailPoint();
-        } else if (hadQueued) {
-            // hard abort only if target dead or fully expired (age > attackWindow * 3)
-            boolean hardAbort = target == null || !isEntityAlive(target)
-                || (lastAttackMs > 0 && System.currentTimeMillis() - lastAttackMs
-                > attackWindow.getValue().longValue() * 3);
-            if (hardAbort) {
-                clear(true, false, true);
-            } else {
-                flushExpired(System.currentTimeMillis());
-            }
+        if (KillAuraModule.getCurrentTarget() instanceof EntityLivingBase) {
+            entity = (EntityLivingBase) KillAuraModule.getCurrentTarget();
+        } else {
+            Object[] list = world.loadedEntityList.stream()
+                    .filter(this::canAttacked)
+                    .sorted(Comparator.comparingDouble(player::getDistanceToEntity))
+                    .toArray();
+            entity = list.length > 0 ? (EntityLivingBase) list[0] : null;
+            if (onlyKillAura.getValue())
+                entity = null;
         }
 
-        if (!hasQueuedIncoming())
-            currentDelayMs = backtrackTime.getValue().intValue();
+        if (entity == null || player == null || world == null) {
+            blockPackets = false;
+            resetPackets();
+            return;
+        }
+
+        RealPosAccess erp = realPos(entity);
+        double d0 = erp.getRealPosX() / 32.0;
+        double d2 = erp.getRealPosY() / 32.0;
+        double d3 = erp.getRealPosZ() / 32.0;
+        double d4 = entity.serverPosX / 32.0;
+        double d5 = entity.serverPosY / 32.0;
+        double d6 = entity.serverPosZ / 32.0;
+        float f = entity.width / 2.0f;
+
+        net.minecraft.util.AxisAlignedBB entityServerPos = new net.minecraft.util.AxisAlignedBB(
+                d4 - f, d5, d6 - f, d4 + f, d5 + entity.height, d6 + f);
+        Vec3 positionEyes = player.getPositionEyes(1.0f);
+        double currentX = MathHelper.clamp_double(positionEyes.xCoord, entityServerPos.minX, entityServerPos.maxX);
+        double currentY = MathHelper.clamp_double(positionEyes.yCoord, entityServerPos.minY, entityServerPos.maxY);
+        double currentZ = MathHelper.clamp_double(positionEyes.zCoord, entityServerPos.minZ, entityServerPos.maxZ);
+
+        net.minecraft.util.AxisAlignedBB entityPosMe = new net.minecraft.util.AxisAlignedBB(
+                d0 - f, d2, d3 - f, d0 + f, d2 + entity.height, d3 + f);
+        double realX = MathHelper.clamp_double(positionEyes.xCoord, entityPosMe.minX, entityPosMe.maxX);
+        double realY = MathHelper.clamp_double(positionEyes.yCoord, entityPosMe.minY, entityPosMe.maxY);
+        double realZ = MathHelper.clamp_double(positionEyes.zCoord, entityPosMe.minZ, entityPosMe.maxZ);
+
+        double distance = hitRange.getValue();
+        if (!player.canEntityBeSeen(entity))
+            distance = distance > 3.0 ? 3.0 : distance;
+
+        // "b" = the player's eyes are closer to the entity's server (past) position than
+        // to its currently-rendered position — i.e. holding packets keeps the entity at a
+        // spot you can still hit. Taking knockback (hurtTime 3..8) or OnlyWhenNeed off
+        // force a release instead.
+        boolean b = positionEyes.distanceTo(new Vec3(currentX, currentY, currentZ))
+                > positionEyes.distanceTo(new Vec3(realX, realY, realZ));
+        if (player.hurtTime < 8 && player.hurtTime > 3)
+            b = false;
+        if (!onlyWhenNeed.getValue())
+            b = true;
+
+        if (b
+                && player.getDistanceToEntity(entity) < distance
+                && System.currentTimeMillis() - blockStartMs >= timeDelay.getValue().longValue()) {
+            blockPackets = true;
+        } else {
+            blockPackets = false;
+            resetPackets();
+            blockStartMs = System.currentTimeMillis();
+        }
     }
 
     @Override
     public boolean onSend(Object packet) {
-        if (!PacketHelper.isUseEntity(packet))
-            return false;
-
-        if (!(packet instanceof C02PacketUseEntity))
-            return false;
-
-        C02PacketUseEntity use = (C02PacketUseEntity) packet;
-        if (use.getAction() != C02PacketUseEntity.Action.ATTACK)
-            return false;
-
-        WorldClient world = Mc.world();
-        int attackedId = resolveUseEntityTargetId(use, world);
-        if (attackedId < 0)
-            return false;
-        Entity enemy = entityById(world, attackedId);
-        if (!(enemy instanceof EntityLivingBase))
-            return false;
-
-        EntityPlayerSP player = Mc.player();
-        if (player == null)
-            return false;
-
-        noteAttack((EntityLivingBase) enemy, player);
         return false;
-    }
-
-    public void noteForgeAttack(Object enemy) {
-        if (!isEnabled() || !(enemy instanceof EntityLivingBase))
-            return;
-        EntityPlayerSP player = Mc.player();
-        if (player == null)
-            return;
-        noteAttack((EntityLivingBase) enemy, player);
-    }
-
-    private void noteAttack(EntityLivingBase enemy, EntityPlayerSP player) {
-        lastAttackMs = System.currentTimeMillis();
-        rolledChance = (float) (Math.random() * 100.0);
-
-        if (enemy == target) {
-            targetHitCount++;
-            comboCount++;
-        } else {
-            targetHitCount = 1;
-            comboCount = 1;
-        }
-
-        processTarget(enemy, player);
     }
 
     @Override
     public boolean onReceive(Object packet) {
-        if (PacketUtil.isDispatching())
+        if (!(packet instanceof Packet))
             return false;
-        if (KnockbackDelayModule.isOwningInboundQueue())
-            return false;
-
-        if (disableOnHit.getValue() && hasQueuedIncoming()
-                && PacketHelper.isSelfEntityVelocity(packet)) {
-            clear(true, false, true);
-            return false;
-        }
-
-        boolean hadQueued = hasQueuedIncoming();
-
-        if (!shouldCancelPackets() && !hadQueued)
+        if (Mc.currentScreen() != null)
             return false;
 
-        if (shouldPassOrFlushPacket(packet))
-            return false;
-
-        if (target == null || targetEntityId < 0)
-            return false;
-
-        if (PacketHelper.isBacktrackPassThrough(packet))
-            return false;
-
-        Object world = Mc.world();
-        if (!PacketHelper.isBacktrackQueueCandidate(packet, targetEntityId, world))
-            return false;
-
-        if (!hadQueued)
-            position.setBaseFromEntity(target);
-        position.applyPacket(packet);
-
-        EntityPlayerSP player = Mc.player();
-        if (mode.getValue() == 1 && shouldSmartFlush(player)) {
-            flushAllIncoming();
-            position.setBaseFromEntity(target);
+        // Sync with KnockbackDelay: only one module may own the inbound stream at a time.
+        // When KBD is holding packets, yield so the two don't fight over the same packets.
+        if (KnockbackDelayModule.isOwningInboundQueue() || KnockbackDelayModule.isBlockingBacktrack()) {
+            if (!packets.isEmpty())
+                resetPackets();
+            blockPackets = false;
             return false;
         }
 
-        if (isQueueSpanExceeded()) {
-            flushAllIncoming();
+        if (packet instanceof S08PacketPlayerPosLook) {
+            resetPackets();
             return false;
         }
 
-        trimQueueToMaxDepth();
-
-        if (!InboundLagCoordinator.tryAcquire(InboundLagCoordinator.Owner.BACKTRACK))
-            return false;
-
-        inboundQueue.offer(new QueuedInbound(packet, System.currentTimeMillis()));
-        resyncTrackedPosition();
-        return true;
-    }
-
-    @Override
-    public void onRender(float partialTicks) {
-        if (!enableVisuals.getValue() || !isLagging() || !Mc.isInGame() || target == null)
-            return;
-        resyncTrackedPosition();
-        if (!position.isValid())
-            return;
-
-        double[] ghost = renderGhostPosition();
-        double sx = ghost[0];
-        double sy = ghost[1];
-        double sz = ghost[2];
-
-        double[] vp = Mc.getViewerPos(partialTicks);
-        float alpha = pulseAlpha();
-        boolean hurtFlash = enableHurt.getValue() && target.hurtTime > 0;
-
-        float br = boxColorR.getValue() / 255.0f;
-        float bg = boxColorG.getValue() / 255.0f;
-        float bb = boxColorB.getValue() / 255.0f;
-        if (hurtFlash) {
-            br = hurtColorR.getValue() / 255.0f;
-            bg = hurtColorG.getValue() / 255.0f;
-            bb = hurtColorB.getValue() / 255.0f;
-        }
-
-        RenderHelper.begin();
-        if (renderServerRecord.getValue() && enableTrail.getValue())
-            drawServerTrail(vp, alpha * 0.6f);
-
-        if (enableGlow.getValue()) {
-            float gr = glowColorR.getValue() / 255.0f;
-            float gg = glowColorG.getValue() / 255.0f;
-            float gb = glowColorB.getValue() / 255.0f;
-            drawGhostBox(sx - vp[0], sy - vp[1], sz - vp[2],
-                    gr, gg, gb, alpha * glowIntensity.getValue() * 0.35f);
-        }
-
-        if (drawBox.getValue())
-            drawGhostBox(sx - vp[0], sy - vp[1], sz - vp[2],
-                    br, bg, bb, EspDraw.DEFAULT_FILL_ALPHA * alpha);
-
-        RenderHelper.end();
-    }
-
-    public boolean isLagging() {
-        return isEnabled() && hasQueuedIncoming();
-    }
-
-    public int activeTargetId() {
-        return targetEntityId;
-    }
-
-    private void processTarget(EntityLivingBase enemy, EntityPlayerSP player) {
-        shouldPauseTarget = isLivingEntity(enemy) && shouldPauseForHurtTime(enemy);
-
-        if (!shouldBacktrack(enemy, player))
-            return;
-
-        if (enemy != target)
-            clear(true, false, false);
-
-        target = enemy;
-        targetEntityId = Mc.entityId(enemy);
-        position.setBaseFromEntity(enemy);
-    }
-
-    private void recordTrailPoint() {
-        if (!renderServerRecord.getValue() || !enableTrail.getValue() || !position.isValid())
-            return;
-        long now = System.currentTimeMillis();
-        serverTrail.addLast(new TrailPoint(position.x(), position.y(), position.z(), now));
-        int maxPoints = maxTrailPoints.getValue().intValue();
-        while (serverTrail.size() > maxPoints)
-            serverTrail.pollFirst();
-        long cutoff = now - trailDuration.getValue().longValue();
-        while (!serverTrail.isEmpty() && serverTrail.peekFirst().time < cutoff)
-            serverTrail.pollFirst();
-    }
-
-    private double[] renderGhostPosition() {
-        double sx = position.x();
-        double sy = position.y();
-        double sz = position.z();
-
-        long nowMs = System.currentTimeMillis();
-        if (!ghostInterpValid) {
-            ghostFromX = sx;
-            ghostFromY = sy;
-            ghostFromZ = sz;
-            ghostToX = sx;
-            ghostToY = sy;
-            ghostToZ = sz;
-            ghostInterpStartMs = nowMs;
-            ghostInterpValid = true;
-        } else if (posChanged(sx, sy, sz, ghostToX, ghostToY, ghostToZ)) {
-            double te = Math.min(1.0, (nowMs - ghostInterpStartMs) / (double) GHOST_INTERP_MS);
-            ghostFromX = lerp(ghostFromX, ghostToX, te);
-            ghostFromY = lerp(ghostFromY, ghostToY, te);
-            ghostFromZ = lerp(ghostFromZ, ghostToZ, te);
-            ghostToX = sx;
-            ghostToY = sy;
-            ghostToZ = sz;
-            ghostInterpStartMs = nowMs;
-        }
-
-        double t = Math.min(1.0, (nowMs - ghostInterpStartMs) / (double) GHOST_INTERP_MS);
-        return new double[] {
-                lerp(ghostFromX, ghostToX, t),
-                lerp(ghostFromY, ghostToY, t),
-                lerp(ghostFromZ, ghostToZ, t)
-        };
-    }
-
-    private void clearGhostInterp() {
-        ghostInterpValid = false;
-    }
-
-    private static boolean posChanged(double ax, double ay, double az,
-            double bx, double by, double bz) {
-        return Math.abs(ax - bx) > POS_EPS || Math.abs(ay - by) > POS_EPS || Math.abs(az - bz) > POS_EPS;
-    }
-
-    private static double lerp(double from, double to, double t) {
-        if (t <= 0.0)
-            return from;
-        if (t >= 1.0)
-            return to;
-        return from + (to - from) * t;
-    }
-
-    private float pulseAlpha() {
-        if (!enablePulse.getValue())
-            return 1.0f;
-        float minA = pulseMinAlpha.getValue() / 100.0f;
-        float maxA = pulseMaxAlpha.getValue() / 100.0f;
-        double wave = Math.sin(System.currentTimeMillis() * 0.001 * pulseSpeed.getValue());
-        return minA + (float) ((wave + 1.0) * 0.5 * (maxA - minA));
-    }
-
-    private void drawServerTrail(double[] vp, float alpha) {
-        if (serverTrail.size() < 2)
-            return;
-        float r = trailColorR.getValue() / 255.0f;
-        float g = trailColorG.getValue() / 255.0f;
-        float b = trailColorB.getValue() / 255.0f;
-        TrailPoint prev = null;
-        for (TrailPoint point : serverTrail) {
-            if (prev != null) {
-                RenderHelper.drawLine3D(
-                        prev.x - vp[0], prev.y - vp[1], prev.z - vp[2],
-                        point.x - vp[0], point.y - vp[1], point.z - vp[2],
-                        r, g, b, alpha, 1.0f);
+        if (packet instanceof S14PacketEntity) {
+            S14PacketEntity p = (S14PacketEntity) packet;
+            WorldClient world = Mc.world();
+            Entity e = world != null ? p.getEntity(world) : null;
+            if (e instanceof EntityLivingBase) {
+                EntityLivingBase elb = (EntityLivingBase) e;
+                RealPosAccess rp = realPos(elb);
+                rp.setRealPosX(rp.getRealPosX() + p.func_149062_c());
+                rp.setRealPosY(rp.getRealPosY() + p.func_149061_d());
+                rp.setRealPosZ(rp.getRealPosZ() + p.func_149064_e());
             }
-            prev = point;
         }
-    }
 
-    private boolean isQueueSpanExceeded() {
-        QueuedInbound head = inboundQueue.peek();
-        if (head == null)
-            return false;
-        return System.currentTimeMillis() - head.time >= backtrackTime.getValue().longValue();
-    }
-
-    private void trimQueueToMaxDepth() {
-        QueuedInbound oldest;
-        while (inboundQueue.size() >= MAX_QUEUE_DEPTH && (oldest = inboundQueue.poll()) != null) {
-            PacketUtil.processInbound(oldest.packet);
-            resyncTrackedPosition();
-        }
-    }
-
-    private void refreshAttackTarget(EntityPlayerSP player) {
-        if (target == null)
-            return;
-        shouldPauseTarget = isLivingEntity(target) && shouldPauseForHurtTime(target);
-
-        long now = System.currentTimeMillis();
-        boolean attackExpired = now - lastAttackMs > attackWindow.getValue().longValue();
-
-        boolean inRange = !useDistanceCheck.getValue() || isInDistanceRange(player, target);
-        if (inRange)
-            trackingBufferUntilMs = now + TRACKING_BUFFER_MS;
-
-        boolean outOfRange = useDistanceCheck.getValue() && !inRange && now > trackingBufferUntilMs;
-        if (!isEntityAlive(target) || attackExpired || outOfRange) {
-            if (!hasQueuedIncoming())
-                clear(false, false, true);
-        }
-    }
-
-    private boolean shouldBacktrack(EntityLivingBase enemy, EntityPlayerSP player) {
-        if (holdingWeapon.getValue() && !isHoldingWeapon(player))
-            return false;
-
-        boolean inRange = !useDistanceCheck.getValue() || isInDistanceRange(player, enemy);
-        if (inRange)
-            trackingBufferUntilMs = System.currentTimeMillis() + TRACKING_BUFFER_MS;
-
-        long now = System.currentTimeMillis();
-        if (useDistanceCheck.getValue() && !inRange && now > trackingBufferUntilMs)
-            return false;
-
-        if (!shouldAttackEntity(enemy, player))
-            return false;
-
-        if (player.ticksExisted <= 10)
-            return false;
-
-        if (now < nextBacktrackAllowedAtMs)
-            return false;
-
-        if (rolledChance >= chance.getValue())
-            return false;
-
-        if (shouldPauseTarget)
-            return false;
-
-        if (now - lastAttackMs > attackWindow.getValue().longValue())
-            return false;
-
-        int req = requiredHits.getValue().intValue();
-        if (req > 0 && targetHitCount < req)
-            return false;
-
-        int comboReq = comboThreshold.getValue().intValue();
-        if (comboReq > 0 && comboCount < comboReq)
-            return false;
-
-        if (KnockbackDelayModule.isBlockingBacktrack())
-            return false;
-
-        return true;
-    }
-
-    private boolean isInDistanceRange(EntityPlayerSP player, EntityLivingBase entity) {
-        double dist = boxedDistanceTo(player, entity);
-        return dist >= distanceMin.getValue() && dist <= distanceMax.getValue();
-    }
-
-    /** Advanced mode: flush when tracked server position is closer than the rendered entity. */
-    private boolean shouldSmartFlush(EntityPlayerSP player) {
-        if (target == null || !position.isValid())
-            return false;
-        double ghostDist = squaredBoxDistanceToGhost(player);
-        double visibleDist = squaredBoxDistanceTo(player, target);
-        return ghostDist + 0.01 < visibleDist;
-    }
-
-    private double squaredBoxDistanceToGhost(EntityPlayerSP player) {
-        double px = player.posX;
-        double py = player.posY;
-        double pz = player.posZ;
-        double halfW = target != null ? target.width * 0.5f : 0.3f;
-        double height = target != null ? target.height : 1.8;
-        double ex = position.x();
-        double ey = position.y();
-        double ez = position.z();
-        double cx = clamp(px, ex - halfW, ex + halfW);
-        double cy = clamp(py, ey, ey + height);
-        double cz = clamp(pz, ez - halfW, ez + halfW);
-        double dx = cx - px;
-        double dy = cy - py;
-        double dz = cz - pz;
-        return dx * dx + dy * dy + dz * dz;
-    }
-
-    private boolean shouldCancelPackets() {
-        EntityPlayerSP player = Mc.player();
-        if (player == null || target == null || !isEntityAlive(target))
-            return false;
-        return shouldBacktrack(target, player);
-    }
-
-    private boolean hasQueuedIncoming() {
-        return !inboundQueue.isEmpty();
-    }
-
-    private void flushExpired(long nowMs) {
-        int released = 0;
-        while (released < MAX_INBOUND_RELEASE_PER_TICK) {
-            QueuedInbound head = inboundQueue.peek();
-            if (head == null || nowMs - head.time < currentDelayMs)
-                break;
-            inboundQueue.poll();
-            PacketUtil.processInbound(head.packet);
-            released++;
-        }
-        resyncTrackedPosition();
-    }
-
-    private void flushAllIncoming() {
-        QueuedInbound entry;
-        while ((entry = inboundQueue.poll()) != null)
-            PacketUtil.processInbound(entry.packet);
-        resyncTrackedPosition();
-    }
-
-    private void clear(boolean handlePackets, boolean clearOnly, boolean resetChronometers) {
-        if (handlePackets && !clearOnly)
-            flushAllIncoming();
-        else if (clearOnly)
-            inboundQueue.clear();
-
-        if (target != null && resetChronometers)
-            nextBacktrackAllowedAtMs = System.currentTimeMillis() + cooldown.getValue().longValue();
-
-        target = null;
-        targetEntityId = -1;
-        position.reset();
-        serverTrail.clear();
-        clearGhostInterp();
-        shouldPauseTarget = false;
-        if (!hasQueuedIncoming())
-            InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
-    }
-
-    private void resyncTrackedPosition() {
-        if (target == null) {
-            position.reset();
-            return;
-        }
-        position.rebuildFrom(target, queuedPackets());
-    }
-
-    private Iterable<Object> queuedPackets() {
-        return () -> new java.util.Iterator<Object>() {
-            private final java.util.Iterator<QueuedInbound> it = inboundQueue.iterator();
-
-            @Override
-            public boolean hasNext() {
-                return it.hasNext();
+        if (packet instanceof S18PacketEntityTeleport) {
+            S18PacketEntityTeleport p = (S18PacketEntityTeleport) packet;
+            Entity e = Mc.world() != null ? Mc.world().getEntityByID(p.getEntityId()) : null;
+            if (e instanceof EntityLivingBase) {
+                EntityLivingBase elb = (EntityLivingBase) e;
+                RealPosAccess rp = realPos(elb);
+                rp.setRealPosX(p.getX());
+                rp.setRealPosY(p.getY());
+                rp.setRealPosZ(p.getZ());
             }
+        }
 
-            @Override
-            public Object next() {
-                return it.next().packet;
-            }
-        };
-    }
-
-    private boolean shouldPauseForHurtTime(EntityLivingBase entity) {
-        int maxTicks = maxHurtTimeTicks();
-        if (maxTicks <= 0)
+        if (entity == null) {
+            resetPackets();
             return false;
-        return entity.hurtTime >= maxTicks;
-    }
+        }
 
-    private int maxHurtTimeTicks() {
-        return Math.max(0, (int) (hurtTime.getValue() / 50.0f));
-    }
-
-    private boolean isHoldingWeapon(EntityPlayerSP player) {
-        ItemStack stack = player.getHeldItem();
-        if (stack == null)
-            return false;
-        return stack.getItem() instanceof ItemSword || stack.getItem() instanceof ItemAxe;
-    }
-
-    private boolean shouldPassOrFlushPacket(Object packet) {
-        if (packet == null)
+        if (delayPackets(packet)) {
+            packets.add((Packet<?>) packet);
             return true;
-        if (PacketHelper.isPlayerPosLook(packet) || PacketHelper.isDisconnect(packet)) {
-            clear(true, false, true);
-            return true;
-        }
-        if (packet instanceof S06PacketUpdateHealth) {
-            if (((S06PacketUpdateHealth) packet).getHealth() <= 0f) {
-                clear(true, false, true);
-                return true;
-            }
-        }
-        if (packet instanceof S13PacketDestroyEntities && targetEntityId >= 0) {
-            for (int id : ((S13PacketDestroyEntities) packet).getEntityIDs()) {
-                if (id == targetEntityId) {
-                    clear(true, false, true);
-                    return true;
-                }
-            }
         }
         return false;
     }
 
-    private static boolean shouldAttackEntity(EntityLivingBase entity, EntityPlayerSP player) {
-        if (entity == null || entity == player)
-            return false;
-        if (!(entity instanceof EntityPlayer))
-            return false;
-        return isEntityAlive(entity);
-    }
+    @Override
+    public void onRender(float partialTicks) {
+        if (!esp.getValue() || entity == null || !blockPackets || !Mc.isInGame())
+            return;
 
-    private static boolean isLivingEntity(EntityLivingBase entity) {
-        return entity instanceof EntityPlayer;
-    }
+        RealPosAccess rrp = realPos(entity);
+        double rx = rrp.getRealPosX() / 32.0;
+        double ry = rrp.getRealPosY() / 32.0;
+        double rz = rrp.getRealPosZ() / 32.0;
+        float f = entity.width / 2.0f;
 
-    private static boolean isEntityAlive(EntityLivingBase entity) {
-        return entity != null && !entity.isDead && entity.deathTime <= 0;
-    }
+        double[] vp = Mc.getViewerPos(partialTicks);
+        float r = 0.0f;
+        float g = 1.0f;
+        float bl = 0.0f;
+        float lineWidth = 3.0f;
+        float alpha = 0.15f;
 
-    private static Entity entityById(WorldClient world, int entityId) {
-        if (world == null || entityId < 0)
-            return null;
-        for (Entity entity : world.loadedEntityList) {
-            if (entity != null && Mc.entityId(entity) == entityId)
-                return entity;
+        EntityPlayerSP player = Mc.player();
+        if (player != null && player.getDistanceToEntity(entity) > 1.0f) {
+            double d = 1.0f - player.getDistanceToEntity(entity) / 20.0f;
+            if (d < 0.3)
+                d = 0.3;
+            lineWidth *= (float) d;
         }
-        return null;
-    }
 
-    private static int resolveUseEntityTargetId(C02PacketUseEntity packet, WorldClient world) {
-        int direct = ((IAccessorC02PacketUseEntity) packet).getEntityId();
-        if (direct > 0)
-            return direct;
-        if (world != null) {
-            Entity entity = packet.getEntityFromWorld(world);
-            int resolved = Mc.entityId(entity);
-            if (resolved > 0)
-                return resolved;
-        }
-        return -1;
-    }
-
-    private static double boxedDistanceTo(EntityPlayerSP player, EntityLivingBase entity) {
-        return Math.sqrt(squaredBoxDistanceTo(player, entity));
-    }
-
-    private static double squaredBoxDistanceTo(EntityPlayerSP player, EntityLivingBase entity) {
-        double px = player.posX;
-        double py = player.posY;
-        double pz = player.posZ;
-        double ex = entity.posX;
-        double ey = entity.posY;
-        double ez = entity.posZ;
-        double halfW = entity.width * 0.5f;
-        double height = entity.height;
-        double cx = clamp(px, ex - halfW, ex + halfW);
-        double cy = clamp(py, ey, ey + height);
-        double cz = clamp(pz, ez - halfW, ez + halfW);
-        double dx = cx - px;
-        double dy = cy - py;
-        double dz = cz - pz;
-        return dx * dx + dy * dy + dz * dz;
-    }
-
-    private static double clamp(double v, double min, double max) {
-        return Math.max(min, Math.min(max, v));
-    }
-
-    private void drawGhostBox(double rx, double ry, double rz,
-            float r, float g, float b, float alpha) {
-        double half = 0.3;
-        double height = 1.8;
-        if (target != null) {
-            half = target.width * 0.5f;
-            height = target.height;
-        }
+        RenderHelper.begin();
         EspDraw.fill(
-                rx - half, ry, rz - half,
-                rx + half, ry + height, rz + half,
-                r, g, b, alpha);
+                rx - f - vp[0], ry - vp[1], rz - f - vp[2],
+                rx + f - vp[0], ry + entity.height - vp[1], rz + f - vp[2],
+                r, g, bl, alpha);
+        RenderHelper.end();
     }
 
-    private static final class QueuedInbound {
-        final Object packet;
-        final long time;
+    private boolean canAttacked(Entity entity) {
+        if (!(entity instanceof EntityLivingBase))
+            return false;
+        EntityLivingBase elb = (EntityLivingBase) entity;
+        if (entity.isInvisible())
+            return false;
+        if (elb.deathTime > 1)
+            return false;
+        if (entity instanceof EntityArmorStand && !armorStand.getValue())
+            return false;
+        if (entity instanceof EntityAnimal && !animal.getValue())
+            return false;
+        if (entity instanceof EntityMob && !mob.getValue())
+            return false;
+        if (entity instanceof EntityPlayer && !player.getValue())
+            return false;
+        if (entity instanceof EntityVillager && !villager.getValue())
+            return false;
+        if (entity.ticksExisted < 50)
+            return false;
+        if (entity instanceof EntityPlayer && RavenAntiBot.isBot((EntityPlayer) entity))
+            return false;
+        if (entity.isDead)
+            return false;
+        EntityPlayerSP p = Mc.player();
+        return p != null && !(entity == p) && p.getDistanceToEntity(entity) < preAimRange.getValue();
+    }
 
-        QueuedInbound(Object packet, long time) {
-            this.packet = packet;
-            this.time = time;
+    private boolean delayPackets(Object packet) {
+        if (packet instanceof S03PacketTimeUpdate)
+            return packetTimeUpdate.getValue();
+        if (packet instanceof S00PacketKeepAlive)
+            return packetKeepAlive.getValue();
+        if (packet instanceof S12PacketEntityVelocity)
+            return packetVelocity.getValue();
+        if (packet instanceof S27PacketExplosion)
+            return packetVelocityExplosion.getValue();
+        if (packet instanceof S19PacketEntityStatus) {
+            S19PacketEntityStatus status = (S19PacketEntityStatus) packet;
+            return status.getOpCode() != 2
+                    || !(Mc.world() != null
+                    && Mc.world().getEntityByID(PacketHelper.entityId(packet)) instanceof EntityLivingBase);
         }
+        return !(packet instanceof S06PacketUpdateHealth)
+                && !(packet instanceof S29PacketSoundEffect)
+                && !(packet instanceof S3EPacketTeams)
+                && !(packet instanceof S0CPacketSpawnPlayer);
     }
 
-    private static final class TrailPoint {
-        final double x;
-        final double y;
-        final double z;
-        final long time;
-
-        TrailPoint(double x, double y, double z, long time) {
-            this.x = x;
-            this.y = y;
-            this.z = z;
-            this.time = time;
+    private void resetPackets() {
+        if (packets.isEmpty())
+            return;
+        Object netHandler = Mc.netHandler();
+        while (!packets.isEmpty()) {
+            Packet<?> packet = packets.remove(0);
+            if (packet == null)
+                continue;
+            if (netHandler != null) {
+                try {
+                    PacketUtil.processInbound(packet);
+                } catch (Throwable ignored) {
+                }
+            }
         }
     }
 }

@@ -38,4 +38,16 @@ public final class EspDraw {
                 minX, minY, minZ, maxX, maxY, maxZ,
                 r, g, b, resolveAlpha(alpha));
     }
+
+    /**
+     * Batched soft fill: draws {@code boxCount} boxes from a flat
+     * {@code float[6 * boxCount]} buffer (minX,minY,minZ,maxX,maxY,maxZ each) in a
+     * single draw call. {@code alpha} ≤ 0 falls back to default.
+     * Must be called between {@link RenderHelper#begin()} and {@link RenderHelper#end()}.
+     */
+    public static void fillBatched(
+            float[] boxes, int boxCount,
+            float r, float g, float b, float alpha) {
+        RenderHelper.drawFilledBoxes(boxes, boxCount, r, g, b, resolveAlpha(alpha));
+    }
 }

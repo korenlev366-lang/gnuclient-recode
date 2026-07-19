@@ -3,6 +3,7 @@ package gnu.client.module;
 import com.google.gson.JsonObject;
 import gnu.client.config.ConfigManager;
 import gnu.client.module.modules.visual.HudModule;
+import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.Setting;
 import gnu.client.ui.hud.ModuleToggleSignals;
 
@@ -18,11 +19,15 @@ public abstract class Module {
     private volatile boolean enabled;
     private int keyCode = -1;
     private final List<Setting<?>> settings = new ArrayList<>();
+    /** Checkbox in every module's settings panel; also the backing store for {@link #isHidden()}. */
+    private final BoolSetting hiddenSetting = new BoolSetting("Hidden", false);
 
     protected Module(String name, String description, Category category) {
         this.name = name;
         this.description = description;
         this.category = category;
+        settings.add(hiddenSetting);
+        hiddenSetting.visibleWhen(() -> category != Category.SETTINGS);
     }
 
     public String getName() {
@@ -53,6 +58,22 @@ public abstract class Module {
 
     public void setKeyCode(int keyCode) {
         this.keyCode = keyCode;
+        if (!ConfigManager.instance().isLoading())
+            ConfigManager.instance().save();
+    }
+
+    /**
+     * When true, the module is excluded from the on-screen ArrayList HUD (but remains
+     * toggleable in the ClickGUI). Authors opt a module out of the array by calling this
+     * in the constructor; it defaults to false, so every module (current and future)
+     * inherits the visible behavior unless explicitly hidden.
+     */
+    public boolean isHidden() {
+        return hiddenSetting.getValue();
+    }
+
+    public void setHidden(boolean hidden) {
+        hiddenSetting.setValue(hidden);
         if (!ConfigManager.instance().isLoading())
             ConfigManager.instance().save();
     }

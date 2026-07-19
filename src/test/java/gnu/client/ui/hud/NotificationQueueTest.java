@@ -3,8 +3,11 @@ package gnu.client.ui.hud;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.util.List;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -92,5 +95,22 @@ public class NotificationQueueTest {
         assertEquals(1, queue.exitingCount());
         queue.advance(t0 + NotificationQueue.HOLD_NS + NotificationQueue.EXIT_NS);
         assertEquals(0, queue.exitingCount());
+    }
+
+    @Test
+    public void bottomFirstReusesInstanceAndRefreshesContents() {
+        long t0 = 1_000_000_000L;
+        queue.enqueue("A", true, t0);
+        List<NotificationQueue.Entry> first = queue.bottomFirst();
+        // Re-calling without mutation returns the same cached list (no per-call alloc).
+        assertSame(first, queue.bottomFirst());
+        assertEquals(1, first.size());
+
+        // A new enqueue refreshes the cached list's contents (same instance, updated size).
+        queue.enqueue("B", false, t0 + 1);
+        List<NotificationQueue.Entry> second = queue.bottomFirst();
+        assertSame(first, second);
+        assertEquals(2, second.size());
+        assertEquals("B", second.get(0).moduleName);
     }
 }

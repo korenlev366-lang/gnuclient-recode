@@ -68,8 +68,12 @@ public final class CategoryColumn {
         this.zOrder = zOrder;
     }
 
-    public void bringToFront(int nextZ) {
+    /** @return true if the z-order actually changed (so callers can invalidate caches). */
+    public boolean bringToFront(int nextZ) {
+        if (this.zOrder == nextZ)
+            return false;
         this.zOrder = nextZ;
+        return true;
     }
 
     public boolean isDragging() {

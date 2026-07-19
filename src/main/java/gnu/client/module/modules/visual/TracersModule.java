@@ -35,6 +35,7 @@ public final class TracersModule extends Module {
     private static final double EYE_Y = 1.62;
 
     private final List<EntityData> cache = new ArrayList<>();
+    private final List<Entity> scratch = new ArrayList<>();
 
     public TracersModule() {
         super("Tracers", "Lines from camera to players", Category.VISUALS);
@@ -58,11 +59,11 @@ public final class TracersModule extends Module {
             return;
 
         Entity self = Mc.player();
-        for (Entity entity : Mc.getWorldEntitiesFiltered(Mc.world())) {
+        for (Entity entity : Mc.getWorldEntitiesFilteredInto(Mc.world(), scratch)) {
             if (!showSelf.getValue() && entity == self)
                 continue;
 
-            EntityData data = new EntityData();
+            EntityData data = obtain(cache, cache.size());
             data.lastX = entity.lastTickPosX;
             data.lastY = entity.lastTickPosY;
             data.lastZ = entity.lastTickPosZ;
@@ -70,7 +71,6 @@ public final class TracersModule extends Module {
             data.posY = entity.posY;
             data.posZ = entity.posZ;
             data.sneaking = entity.isSneaking();
-            cache.add(data);
         }
     }
 
@@ -113,5 +113,13 @@ public final class TracersModule extends Module {
         }
 
         RenderHelper.end();
+    }
+
+    private static EntityData obtain(List<EntityData> list, int index) {
+        if (index < list.size())
+            return list.get(index);
+        EntityData data = new EntityData();
+        list.add(data);
+        return data;
     }
 }

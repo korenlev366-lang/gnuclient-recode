@@ -12,6 +12,8 @@ public abstract class Setting<T> {
     private boolean visible = true;
     /** Optional live predicate (mode/bool gates). Evaluated every GUI frame. */
     private BooleanSupplier visibilityCondition;
+    /** Optional live predicate — when true the setting is shown but greyed/locked. */
+    private BooleanSupplier disabledCondition;
 
     protected Setting(String name, T value) {
         this.name = name;
@@ -60,6 +62,24 @@ public abstract class Setting<T> {
     public final <S extends Setting<?>> S visibleWhen(BooleanSupplier condition) {
         this.visibilityCondition = condition;
         return (S) this;
+    }
+
+    /**
+     * Grey out and lock this setting while {@code condition} is true. Used for toggles
+     * that conflict with an external mod (e.g. OptiFine Fast Render owning the render
+     * path). The setting stays visible but cannot be toggled until the condition clears.
+     *
+     * @return {@code this} for fluent use with {@code addSetting}
+     */
+    @SuppressWarnings("unchecked")
+    public final <S extends Setting<?>> S disabledWhen(BooleanSupplier condition) {
+        this.disabledCondition = condition;
+        return (S) this;
+    }
+
+    /** True when a {@link #disabledWhen} predicate is currently active. */
+    public boolean isDisabled() {
+        return disabledCondition != null && disabledCondition.getAsBoolean();
     }
 
     public abstract JsonElement serialize();

@@ -41,6 +41,8 @@ public class ClickGuiScreen extends GuiScreen {
     private boolean searchFocused;
     private int nextZ = 1;
     private boolean layoutDirty;
+    private List<CategoryColumn> zOrderCache;
+    private boolean zOrderDirty = true;
 
     public ClickGuiScreen() {
         rebuild();
@@ -73,6 +75,7 @@ public class ClickGuiScreen extends GuiScreen {
             columns.add(column);
         }
         nextZ = z;
+        zOrderDirty = true;
     }
 
     @Override
@@ -239,6 +242,8 @@ public class ClickGuiScreen extends GuiScreen {
     }
 
     private List<CategoryColumn> sortedByZ() {
+        if (!zOrderDirty && zOrderCache != null)
+            return zOrderCache;
         List<CategoryColumn> ordered = new ArrayList<CategoryColumn>(columns);
         Collections.sort(ordered, new Comparator<CategoryColumn>() {
             @Override
@@ -246,6 +251,8 @@ public class ClickGuiScreen extends GuiScreen {
                 return Integer.compare(a.getZOrder(), b.getZOrder());
             }
         });
+        zOrderCache = ordered;
+        zOrderDirty = false;
         return ordered;
     }
 
@@ -267,7 +274,8 @@ public class ClickGuiScreen extends GuiScreen {
 
         for (CategoryColumn column : sortedByZDesc()) {
             if (column.containsPoint(lx, ly)) {
-                column.bringToFront(nextZ++);
+                if (column.bringToFront(nextZ++))
+                    zOrderDirty = true;
                 column.mouseClicked(lx, ly, mouseButton, search);
                 layoutDirty = true;
                 return;

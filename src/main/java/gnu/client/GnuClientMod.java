@@ -34,6 +34,7 @@ import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.module.impl.client.Settings;
 import gnu.client.module.modules.settings.ClickGuiModule;
 import gnu.client.module.modules.settings.ConfigManagerModule;
+import gnu.client.module.modules.settings.PerformanceModule;
 import gnu.client.module.modules.visual.BedEspModule;
 import gnu.client.module.modules.visual.EspModule;
 import gnu.client.module.modules.visual.FreeLookModule;
@@ -103,6 +104,7 @@ public class GnuClientMod {
         safeRegister(new Settings());
         safeRegister(new ClickGuiModule());
         safeRegister(new ConfigManagerModule());
+        safeRegister(new PerformanceModule());
         safeRegister(new WTapModule());
         safeRegister(new MoreKBModule());
         safeRegister(new SprintModule());

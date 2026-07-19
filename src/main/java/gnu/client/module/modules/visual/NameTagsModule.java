@@ -45,6 +45,7 @@ public final class NameTagsModule extends Module {
     private final BoolSetting background = addSetting(new BoolSetting("Background", true));
 
     private final List<EntityData> cache = new ArrayList<>();
+    private final List<Entity> scratch = new ArrayList<>();
 
     private double vpX, vpY, vpZ;
     private double lastVpX, lastVpY, lastVpZ;
@@ -99,7 +100,7 @@ public final class NameTagsModule extends Module {
         if (mcDisplayHeight < 1)
             mcDisplayHeight = 1;
 
-        for (Entity entity : Mc.getWorldEntitiesFiltered(world)) {
+        for (Entity entity : Mc.getWorldEntitiesFilteredInto(world, scratch)) {
             if (!showSelf.getValue() && entity == player)
                 continue;
 
@@ -113,7 +114,7 @@ public final class NameTagsModule extends Module {
             if (tag == null || tag.isEmpty())
                 continue;
 
-            EntityData data = new EntityData();
+            EntityData data = obtain(cache, cache.size());
             data.lastX = entity.lastTickPosX;
             data.lastY = entity.lastTickPosY;
             data.lastZ = entity.lastTickPosZ;
@@ -122,7 +123,6 @@ public final class NameTagsModule extends Module {
             data.posZ = entity.posZ;
             data.sneaking = entity.isSneaking();
             data.tag = tag;
-            cache.add(data);
         }
 
         lastVpX = vpX;
@@ -155,7 +155,10 @@ public final class NameTagsModule extends Module {
         double rvpY = lastVpY + (vpY - lastVpY) * lastPartialTicks;
         double rvpZ = lastVpZ + (vpZ - lastVpZ) * lastPartialTicks;
 
-        GL11.glPushAttrib(GL11.GL_ALL_ATTRIB_BITS);
+        // Targeted state save (no GL_ALL_ATTRIB_BITS — that snapshots every GL attrib).
+        boolean depthWas = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
+        boolean blendWas = GL11.glIsEnabled(GL11.GL_BLEND);
+        boolean texWas = GL11.glIsEnabled(GL11.GL_TEXTURE_2D);
         GL11.glMatrixMode(GL11.GL_PROJECTION);
         GL11.glPushMatrix();
         GL11.glLoadIdentity();
@@ -213,7 +216,19 @@ public final class NameTagsModule extends Module {
         GL11.glMatrixMode(GL11.GL_PROJECTION);
         GL11.glPopMatrix();
         GL11.glMatrixMode(GL11.GL_MODELVIEW);
-        GL11.glPopAttrib();
+
+        if (depthWas)
+            GL11.glEnable(GL11.GL_DEPTH_TEST);
+        else
+            GL11.glDisable(GL11.GL_DEPTH_TEST);
+        if (blendWas)
+            GL11.glEnable(GL11.GL_BLEND);
+        else
+            GL11.glDisable(GL11.GL_BLEND);
+        if (texWas)
+            GL11.glEnable(GL11.GL_TEXTURE_2D);
+        else
+            GL11.glDisable(GL11.GL_TEXTURE_2D);
     }
 
     private double[] projectToScreen(double wx, double wy, double wz,
@@ -294,5 +309,13 @@ public final class NameTagsModule extends Module {
         GL11.glEnd();
         GL11.glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
         GL11.glEnable(GL11.GL_TEXTURE_2D);
+    }
+
+    private static EntityData obtain(List<EntityData> list, int index) {
+        if (index < list.size())
+            return list.get(index);
+        EntityData data = new EntityData();
+        list.add(data);
+        return data;
     }
 }

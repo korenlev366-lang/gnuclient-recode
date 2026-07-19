@@ -22,6 +22,8 @@ public final class NotificationQueue {
     private final Object lock = new Object();
     private final List<Entry> live = new ArrayList<Entry>();
     private final List<Entry> exiting = new ArrayList<Entry>();
+    private final List<Entry> bottomFirstCache = new ArrayList<Entry>();
+    private boolean bottomFirstDirty = true;
     private boolean suppress;
 
     /** Snapshot for rendering (immutable fields; anim floats updated on render thread). */
@@ -109,6 +111,7 @@ public final class NotificationQueue {
                 Entry dropped = live.remove(0);
                 beginExit(dropped, nowNs);
             }
+            bottomFirstDirty = true;
         }
     }
 
@@ -122,6 +125,7 @@ public final class NotificationQueue {
         while (exiting.size() > EXIT_CAP) {
             exiting.remove(0);
         }
+        bottomFirstDirty = true;
     }
 
     /**
@@ -129,18 +133,24 @@ public final class NotificationQueue {
      */
     public void advance(long nowNs) {
         synchronized (lock) {
+            boolean changed = false;
             for (int i = live.size() - 1; i >= 0; i--) {
                 Entry e = live.get(i);
                 if (e.ageNs(nowNs) >= HOLD_NS) {
                     live.remove(i);
                     beginExit(e, nowNs);
+                    changed = true;
                 }
             }
             for (int i = exiting.size() - 1; i >= 0; i--) {
                 Entry e = exiting.get(i);
                 if (nowNs - e.exitStartedAtNs >= EXIT_NS) {
                     exiting.remove(i);
+                    changed = true;
                 }
+            }
+            if (changed) {
+                bottomFirstDirty = true;
             }
         }
     }
@@ -148,17 +158,21 @@ public final class NotificationQueue {
     /**
      * Bottom-first draw order: index 0 is nearest the bottom edge (newest live),
      * then older live, then exiting toasts stacked above.
+     * Returns a reused list (rebuilt only when live/exiting changed) — do not mutate.
      */
     public List<Entry> bottomFirst() {
         synchronized (lock) {
-            List<Entry> bottomFirst = new ArrayList<Entry>();
-            for (int i = live.size() - 1; i >= 0; i--) {
-                bottomFirst.add(live.get(i));
+            if (bottomFirstDirty) {
+                bottomFirstCache.clear();
+                for (int i = live.size() - 1; i >= 0; i--) {
+                    bottomFirstCache.add(live.get(i));
+                }
+                for (int i = exiting.size() - 1; i >= 0; i--) {
+                    bottomFirstCache.add(exiting.get(i));
+                }
+                bottomFirstDirty = false;
             }
-            for (int i = exiting.size() - 1; i >= 0; i--) {
-                bottomFirst.add(exiting.get(i));
-            }
-            return bottomFirst;
+            return bottomFirstCache;
         }
     }
 
@@ -184,6 +198,7 @@ public final class NotificationQueue {
         synchronized (lock) {
             live.clear();
             exiting.clear();
+            bottomFirstDirty = true;
         }
     }
 

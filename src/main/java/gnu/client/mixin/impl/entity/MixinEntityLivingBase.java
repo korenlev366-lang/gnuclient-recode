@@ -21,6 +21,7 @@ import net.minecraftforge.common.MinecraftForge;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
@@ -29,9 +30,51 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import java.util.Map;
 
 @Mixin(EntityLivingBase.class)
-public abstract class MixinEntityLivingBase extends Entity {
+public abstract class MixinEntityLivingBase extends Entity implements gnu.client.mixin.RealPosAccess {
     public MixinEntityLivingBase(World worldIn) {
         super(worldIn);
+    }
+
+    /**
+     * Augustus-style server position. Updated from {@code S14PacketEntity} (relative
+     * deltas) and {@code S18PacketEntityTeleport} (absolute) so the BackTrack module can
+     * render an entity at its last known server position while inbound packets are held.
+     */
+    @Unique
+    public double realPosX;
+    @Unique
+    public double realPosY;
+    @Unique
+    public double realPosZ;
+
+    @Override
+    public double getRealPosX() {
+        return realPosX;
+    }
+
+    @Override
+    public void setRealPosX(double value) {
+        realPosX = value;
+    }
+
+    @Override
+    public double getRealPosY() {
+        return realPosY;
+    }
+
+    @Override
+    public void setRealPosY(double value) {
+        realPosY = value;
+    }
+
+    @Override
+    public double getRealPosZ() {
+        return realPosZ;
+    }
+
+    @Override
+    public void setRealPosZ(double value) {
+        realPosZ = value;
     }
 
     private final Map<Integer, PotionEffect> activePotionsMap = Maps.newHashMap();

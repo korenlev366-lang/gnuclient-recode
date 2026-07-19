@@ -80,6 +80,9 @@ public final class HudModule extends Module {
             if (m.getCategory() == Category.SETTINGS) {
                 continue;
             }
+            if (m.isHidden()) {
+                continue;
+            }
             enabled.add(m);
         }
         enabled.sort(Comparator.comparing(Module::getName));

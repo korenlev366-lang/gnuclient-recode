@@ -134,7 +134,6 @@ public final class KnockbackDelayModule extends Module implements PacketListener
                     return false;
                 if (chance.getValue() < 100.0f && Math.random() * 100.0 >= chance.getValue())
                     return false;
-                BacktrackModule.abortActiveLag();
                 startSession();
             }
         }

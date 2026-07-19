@@ -4,6 +4,7 @@ import gnu.client.mixin.impl.accessors.IAccessorNetworkPlayerInfo;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
+import gnu.client.module.modules.network.BacktrackModule;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.mc.Mc;
@@ -86,7 +87,7 @@ public final class PingFixModule extends Module {
     /** Returns true if any known lag module is actively delaying packets. */
     private boolean isAnyLagModuleActive() {
         Module bt = ModuleManager.INSTANCE.getModule("Back Track");
-        if (bt instanceof BacktrackModule && bt.isEnabled() && ((BacktrackModule) bt).isLagging())
+        if (bt instanceof BacktrackModule && ((BacktrackModule) bt).isLagging())
             return true;
 
         Module lag = ModuleManager.INSTANCE.getModule("Lagrange");

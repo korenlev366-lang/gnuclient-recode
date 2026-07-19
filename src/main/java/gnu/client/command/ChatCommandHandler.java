@@ -38,6 +38,8 @@ public final class ChatCommandHandler implements PacketListener {
             return addChat(ConfigCommand.execute(message));
         if (HelpCommand.handles(message))
             return addChat(HelpCommand.execute(message));
+        if (HideCommand.handles(message))
+            return addChat(HideCommand.execute(message));
         if (!BindCommand.handles(message))
             return false;
 

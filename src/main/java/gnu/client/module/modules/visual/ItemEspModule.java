@@ -45,6 +45,9 @@ public final class ItemEspModule extends Module {
     private final SliderSetting maxDist = addSetting(new SliderSetting("Max Distance", 64.0f, 16.0f, 128.0f));
 
     private final List<EntityData> cache = new ArrayList<>();
+    private final List<Entity> scratch = new ArrayList<>();
+    private float[] boxBuffer = new float[6 * 32];
+    private final float[] singleBox = new float[6];
 
     public ItemEspModule() {
         super("ItemESP", "Highlight valuable dropped items", Category.VISUALS);
@@ -72,7 +75,7 @@ public final class ItemEspModule extends Module {
         double pz = Mc.player().posZ;
         double maxDistSq = maxDist.getValue() * maxDist.getValue();
 
-        for (Entity entity : Mc.getWorldEntitiesFiltered(Mc.world())) {
+        for (Entity entity : Mc.getWorldEntitiesFilteredInto(Mc.world(), scratch)) {
             if (!(entity instanceof EntityItem))
                 continue;
 
@@ -100,7 +103,7 @@ public final class ItemEspModule extends Module {
             if (dx * dx + dy * dy + dz * dz > maxDistSq)
                 continue;
 
-            EntityData data = new EntityData();
+            EntityData data = obtain(cache, cache.size());
             data.lastX = entity.lastTickPosX;
             data.lastY = entity.lastTickPosY;
             data.lastZ = entity.lastTickPosZ;
@@ -110,7 +113,6 @@ public final class ItemEspModule extends Module {
             data.cr = color[0];
             data.cg = color[1];
             data.cb = color[2];
-            cache.add(data);
         }
     }
 
@@ -127,9 +129,10 @@ public final class ItemEspModule extends Module {
         double rvpY = vp[1];
         double rvpZ = vp[2];
 
-        RenderHelper.begin();
-
-        for (EntityData data : cache) {
+        int n = cache.size();
+        ensureBoxCapacity(n);
+        for (int i = 0; i < n; i++) {
+            EntityData data = cache.get(i);
             double ix = Mc.lerp(data.lastX, data.posX, partialTicks);
             double iy = Mc.lerp(data.lastY, data.posY, partialTicks);
             double iz = Mc.lerp(data.lastZ, data.posZ, partialTicks);
@@ -138,12 +141,21 @@ public final class ItemEspModule extends Module {
             double ry = iy - rvpY;
             double rz = iz - rvpZ;
 
-            EspDraw.fill(
-                    rx - 0.15, ry, rz - 0.15,
-                    rx + 0.15, ry + 0.25, rz + 0.15,
-                    data.cr, data.cg, data.cb);
+            int o = i * 6;
+            boxBuffer[o] = (float) (rx - 0.15);
+            boxBuffer[o + 1] = (float) ry;
+            boxBuffer[o + 2] = (float) (rz - 0.15);
+            boxBuffer[o + 3] = (float) (rx + 0.15);
+            boxBuffer[o + 4] = (float) (ry + 0.25);
+            boxBuffer[o + 5] = (float) (rz + 0.15);
         }
 
+        RenderHelper.begin();
+        for (int i = 0; i < n; i++) {
+            EntityData data = cache.get(i);
+            System.arraycopy(boxBuffer, i * 6, singleBox, 0, 6);
+            EspDraw.fillBatched(singleBox, 1, data.cr, data.cg, data.cb, 0f);
+        }
         RenderHelper.end();
     }
 
@@ -164,5 +176,22 @@ public final class ItemEspModule extends Module {
             default:
                 return null;
         }
+    }
+
+    private static EntityData obtain(List<EntityData> list, int index) {
+        if (index < list.size())
+            return list.get(index);
+        EntityData data = new EntityData();
+        list.add(data);
+        return data;
+    }
+
+    private void ensureBoxCapacity(int n) {
+        if (boxBuffer.length >= n * 6)
+            return;
+        int cap = boxBuffer.length;
+        while (cap < n * 6)
+            cap <<= 1;
+        boxBuffer = new float[cap];
     }
 }
