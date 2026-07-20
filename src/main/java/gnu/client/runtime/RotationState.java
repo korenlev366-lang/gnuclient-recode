@@ -5,12 +5,15 @@ import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.util.MathHelper;
 
 /**
- * OpenMyau {@code RotationState} — silent rotation activation, movefix yaw, and
- * F5/FreeLook body/head render angles.
+ * Silent rotation activation, movefix yaw, and F5/FreeLook body/head render angles.
  *
  * <p>{@link #getSmoothedYaw()} is the <b>move yaw</b> ({@code pervYaw}) for
  * {@code fixStrafe}/{@code moveFlying}. Packet yaw/pitch drive C03 and the
- * rendered head via {@link #getRotationYawHead()} / {@link #getRotationPitch()}.
+ * rendered head/body via {@link #getRotationYawHead()} / {@link #getRenderYawOffset()}.
+ *
+ * <p>Body yaw follows the silent/server look (not walk direction). Prev angles advance
+ * at most once per client tick so multi-{@link #applyState} calls in one tick do not
+ * flatten interpolation for F5.
  */
 public final class RotationState {
 
@@ -19,6 +22,7 @@ public final class RotationState {
     private static int state = -1;
     private static float smoothYaw;
     private static int priority = -1;
+    private static int lastApplyTick = Integer.MIN_VALUE;
 
     private static float prevRenderYawOffset;
     private static float renderYawOffset;
@@ -30,8 +34,16 @@ public final class RotationState {
     private RotationState() {}
 
     /**
+     * Unwrap {@code to} onto the continuous branch of {@code from} so render lerps
+     * take the short arc (avoids 179→-179 spinning the long way).
+     */
+    static float continuousYaw(float from, float to) {
+        return from + MathHelper.wrapAngleTo180_float(to - from);
+    }
+
+    /**
      * @param active whether silent rotation is active this tick
-     * @param yaw packet / look yaw (C03 + rendered head)
+     * @param yaw packet / look yaw (C03 + rendered head/body)
      * @param pitch packet pitch (C03 + rendered head)
      * @param pervYaw <b>move yaw</b> for fixStrafe / moveFlying
      * @param rotPriority KillAura=1, Scaffold=3 when MoveFix armed; use {@code -1}
@@ -40,22 +52,23 @@ public final class RotationState {
     public static void applyState(boolean active, float yaw, float pitch, float pervYaw, int rotPriority) {
         state = active ? 0 : state + 1;
         EntityPlayerSP player = mc.thePlayer;
-        if (player != null) {
+        int tick = player != null ? player.ticksExisted : Integer.MIN_VALUE;
+        // Snapshot prev once per tick so later applyState calls only update current.
+        if (tick != lastApplyTick) {
+            lastApplyTick = tick;
             prevRenderYawOffset = renderYawOffset;
-            renderYawOffset = active
-                ? calculateRenderYawOffset(yaw, renderYawOffset)
-                : player.renderYawOffset;
             prevRotationYawHead = rotationYawHead;
-            rotationYawHead = active ? yaw : player.rotationYawHead;
             prevRotationPitch = rotationPitch;
-            rotationPitch = active ? pitch : player.rotationPitch;
-        } else if (active) {
-            prevRenderYawOffset = renderYawOffset;
-            renderYawOffset = calculateRenderYawOffset(yaw, renderYawOffset);
-            prevRotationYawHead = rotationYawHead;
-            rotationYawHead = yaw;
-            prevRotationPitch = rotationPitch;
+        }
+        if (active) {
+            // Body + head face server/silent yaw (wrap-continuous from tick start).
+            renderYawOffset = continuousYaw(prevRenderYawOffset, yaw);
+            rotationYawHead = continuousYaw(prevRotationYawHead, yaw);
             rotationPitch = pitch;
+        } else if (player != null) {
+            renderYawOffset = continuousYaw(prevRenderYawOffset, player.renderYawOffset);
+            rotationYawHead = continuousYaw(prevRotationYawHead, player.rotationYawHead);
+            rotationPitch = player.rotationPitch;
         }
         smoothYaw = pervYaw;
         priority = rotPriority;
@@ -105,30 +118,6 @@ public final class RotationState {
     public static void reset() {
         state = -1;
         priority = -1;
-    }
-
-    /** OpenMyau body-yaw blend toward silent look while moving / swinging. */
-    private static float calculateRenderYawOffset(float targetYaw, float currentYawOffset) {
-        EntityPlayerSP player = mc.thePlayer;
-        float newYawOffset = currentYawOffset;
-        if (player != null) {
-            double deltaX = player.posX - player.prevPosX;
-            double deltaZ = player.posZ - player.prevPosZ;
-            if ((float) (deltaX * deltaX + deltaZ * deltaZ) > 0.0025000002f)
-                newYawOffset = (float) MathHelper.atan2(deltaZ, deltaX) * 180.0f / (float) Math.PI - 90.0f;
-            if (player.swingProgress > 0.0f)
-                newYawOffset = targetYaw;
-        }
-        float wrapped = MathHelper.wrapAngleTo180_float(newYawOffset - currentYawOffset);
-        currentYawOffset += wrapped * 0.3f;
-        float headBodyDiff = MathHelper.wrapAngleTo180_float(targetYaw - currentYawOffset);
-        if (headBodyDiff < -75.0f)
-            headBodyDiff = -75.0f;
-        if (headBodyDiff >= 75.0f)
-            headBodyDiff = 75.0f;
-        newYawOffset = targetYaw - headBodyDiff;
-        if (headBodyDiff * headBodyDiff > 2500.0f)
-            newYawOffset += headBodyDiff * 0.2f;
-        return newYawOffset;
+        lastApplyTick = Integer.MIN_VALUE;
     }
 }

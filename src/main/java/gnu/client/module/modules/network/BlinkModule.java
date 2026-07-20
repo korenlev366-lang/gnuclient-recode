@@ -1,140 +1,125 @@
 package gnu.client.module.modules.network;
 
+import gnu.client.GnuClientMod;
+import gnu.client.lag.api.EnumLagDirection;
+import gnu.client.lag.api.LagRequest;
+import gnu.client.lag.timeout.ModuleBackedTimeout;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
-import gnu.client.module.ModuleManager;
 import gnu.client.module.setting.BoolSetting;
+import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.mc.Mc;
-import gnu.client.runtime.packet.OutboundLagQueue;
-import gnu.client.runtime.packet.PacketEvents;
-import gnu.client.runtime.packet.PacketHelper;
-import gnu.client.runtime.packet.PacketListener;
-import gnu.client.runtime.packet.PacketUtil;
 import gnu.client.util.EspDraw;
 import gnu.client.util.RenderHelper;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.util.Vec3;
+import net.minecraftforge.event.entity.player.AttackEntityEvent;
+import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
+import net.minecraftforge.common.MinecraftForge;
 
-/**
- * raven-bS {@code Blink} — hold outbound packets until disable.
- * Optional step release drains one queued packet every {@link #STEP_RELEASE_INTERVAL_TICKS} ticks.
- */
-public final class BlinkModule extends Module implements PacketListener {
+import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.Set;
 
-    private static final int STEP_RELEASE_INTERVAL_TICKS = 4;
+public final class BlinkModule extends Module {
 
-    private final OutboundLagQueue outbound = new OutboundLagQueue();
-    private final BoolSetting stepRelease = addSetting(new BoolSetting("Step release", false));
-    private final BoolSetting serverEsp = addSetting(new BoolSetting("Server ESP", true));
-    private final SliderSetting espRed = addSetting(new SliderSetting("Red", 0.0f, 0.0f, 255.0f));
-    private final SliderSetting espGreen = addSetting(new SliderSetting("Green", 255.0f, 0.0f, 255.0f));
-    private final SliderSetting espBlue = addSetting(new SliderSetting("Blue", 0.0f, 0.0f, 255.0f));
-    private boolean frozenPosValid;
-    private double frozenX;
-    private double frozenY;
-    private double frozenZ;
-    private int stepReleaseTickCounter;
+    private static final String[] MODE_LABELS = new String[] { "Inbound", "Outbound", "Both" };
+
+    private final ModeSetting mode = addSetting(new ModeSetting("Mode", 1, Arrays.asList(MODE_LABELS)));
+    private final BoolSetting maxDuration = addSetting(new BoolSetting("Max duration", false));
+    private final SliderSetting disableAfterMs = addSetting(new SliderSetting("Disable after", 500.0f, 50.0f, 20000.0f, 50.0f));
+    private final BoolSetting disableOnAttack = addSetting(new BoolSetting("Disable on Attack", false));
+    private final BoolSetting initialPosition = addSetting(new BoolSetting("Show initial position", true));
+    private Vec3 pos;
+    private LagRequest activeLag;
+    private int blinkTicks;
+    private long enableTime;
 
     public BlinkModule() {
-        super("Blink", "Hold outbound packets (Raven); optional step release", Category.MISC);
-        espRed.visibleWhen(() -> serverEsp.getValue());
-        espGreen.visibleWhen(() -> serverEsp.getValue());
-        espBlue.visibleWhen(() -> serverEsp.getValue());
+        super("Blink", "Hold packets with raven-bS Blink behavior", Category.MISC);
+        disableAfterMs.visibleWhen(() -> maxDuration.getValue());
     }
 
     @Override
     public void onEnable() {
-        Module lag = ModuleManager.INSTANCE.getModule("Lagrange");
-        if (lag instanceof LagrangeModule && lag.isEnabled())
-            ((LagrangeModule) lag).pauseForBlink();
-        outbound.clear();
-        stepReleaseTickCounter = 0;
-        freezeCurrentPosition();
-        PacketEvents.register(this);
+        EntityPlayer player = Mc.player();
+        if (player == null || GnuClientMod.lagHandler == null) {
+            setEnabled(false);
+            return;
+        }
+
+        pos = new Vec3(player.posX, player.posY, player.posZ);
+        blinkTicks = 0;
+        enableTime = System.currentTimeMillis();
+        activeLag = new LagRequest(lagDirectionsForMode(), new ModuleBackedTimeout(this));
+        GnuClientMod.lagHandler.requestLag(activeLag);
+        MinecraftForge.EVENT_BUS.register(this);
     }
 
     @Override
     public void onDisable() {
-        PacketEvents.unregister(this);
-        drainOutboundQueue();
+        MinecraftForge.EVENT_BUS.unregister(this);
+        activeLag = null;
+    }
+
+    @Override
+    public void guiUpdate() {
+        disableAfterMs.visibleWhen(() -> maxDuration.getValue());
     }
 
     @Override
     public void onTick() {
-        if (!isEnabled() || !stepRelease.getValue())
+        blinkTicks++;
+        if (maxDuration.getValue()
+            && System.currentTimeMillis() - enableTime >= (int) disableAfterMs.getInput()) {
+            setEnabled(false);
+        }
+    }
+
+    @SubscribeEvent
+    public void onAttackEntity(AttackEntityEvent event) {
+        if (!isEnabled() || !disableOnAttack.getValue() || !Mc.isInGame())
             return;
-        stepReleaseTickCounter++;
-        if (stepReleaseTickCounter >= STEP_RELEASE_INTERVAL_TICKS) {
-            stepReleaseTickCounter = 0;
-            releaseOneHeldPacket();
-        }
-    }
-
-    @Override
-    public boolean onSend(Object packet) {
-        if (PacketUtil.isDispatching())
-            return false;
-        if (PacketHelper.isBlockInteract(packet)) {
-            drainOutboundQueue();
-            return false;
-        }
-        if (PacketHelper.isBlinkOutboundExempt(packet))
-            return false;
-        outbound.offer(packet);
-        return true;
-    }
-
-    @Override
-    public boolean onReceive(Object packet) {
-        return false;
+        if (event.entityPlayer != Mc.player())
+            return;
+        setEnabled(false);
     }
 
     @Override
     public void onRender(float partialTicks) {
-        if (!serverEsp.getValue() || outbound.isEmpty() || !Mc.isInGame() || !frozenPosValid)
+        if (pos == null || !initialPosition.getValue() || !Mc.isInGame())
             return;
-        double[] vp = Mc.getViewerPos(partialTicks);
-        float fr = espRed.getValue() / 255.0f;
-        float fg = espGreen.getValue() / 255.0f;
-        float fb = espBlue.getValue() / 255.0f;
 
+        double[] viewerPos = Mc.getViewerPos(partialTicks);
         RenderHelper.begin();
-        drawGhostBox(frozenX - vp[0], frozenY - vp[1], frozenZ - vp[2], fr, fg, fb);
+        EspDraw.fillWithGlow(
+                pos.xCoord - viewerPos[0] - 0.3,
+                pos.yCoord - viewerPos[1],
+                pos.zCoord - viewerPos[2] - 0.3,
+                pos.xCoord - viewerPos[0] + 0.3,
+                pos.yCoord - viewerPos[1] + 1.8,
+                pos.zCoord - viewerPos[2] + 0.3,
+                0.0f,
+                1.0f,
+                0.0f);
         RenderHelper.end();
     }
 
-    private void freezeCurrentPosition() {
-        net.minecraft.client.entity.EntityPlayerSP player = Mc.player();
-        if (player == null) {
-            frozenPosValid = false;
-            return;
+    @Override
+    public String[] getSuffix() {
+        return new String[] { String.valueOf(blinkTicks) };
+    }
+
+    private Set<EnumLagDirection> lagDirectionsForMode() {
+        switch (mode.getIndex()) {
+            case 0:
+                return EnumLagDirection.ONLY_INBOUND;
+            case 2:
+                return EnumLagDirection.BIDIRECTIONAL;
+            case 1:
+            default:
+                return EnumLagDirection.ONLY_OUTBOUND;
         }
-        frozenX = player.posX;
-        frozenY = player.posY;
-        frozenZ = player.posZ;
-        frozenPosValid = true;
-    }
-
-    private void releaseOneHeldPacket() {
-        outbound.drainUpTo(1, this::releaseHeldPacket);
-    }
-
-    private void releaseHeldPacket(Object pkt) {
-        if (pkt == null)
-            return;
-        if (PacketHelper.isAttackUseEntity(pkt))
-            PacketUtil.sendSwingAnimation();
-        PacketUtil.sendPacketReleased(pkt);
-    }
-
-    private void drainOutboundQueue() {
-        outbound.drainAll(this::releaseHeldPacket);
-    }
-
-    private void drawGhostBox(double rx, double ry, double rz,
-                              float r, float g, float b) {
-        EspDraw.fill(
-                rx - 0.3, ry, rz - 0.3,
-                rx + 0.3, ry + 1.8, rz + 0.3,
-                r, g, b);
     }
 }

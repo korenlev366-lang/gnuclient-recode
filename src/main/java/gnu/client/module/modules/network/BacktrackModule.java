@@ -323,19 +323,10 @@ public final class BacktrackModule extends Module implements PacketListener {
         float r = 0.0f;
         float g = 1.0f;
         float bl = 0.0f;
-        float lineWidth = 3.0f;
         float alpha = 0.15f;
 
-        EntityPlayerSP player = Mc.player();
-        if (player != null && player.getDistanceToEntity(entity) > 1.0f) {
-            double d = 1.0f - player.getDistanceToEntity(entity) / 20.0f;
-            if (d < 0.3)
-                d = 0.3;
-            lineWidth *= (float) d;
-        }
-
         RenderHelper.begin();
-        EspDraw.fill(
+        EspDraw.fillWithGlow(
                 rx - f - vp[0], ry - vp[1], rz - f - vp[2],
                 rx + f - vp[0], ry + entity.height - vp[1], rz + f - vp[2],
                 r, g, bl, alpha);

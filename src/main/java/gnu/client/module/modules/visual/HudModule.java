@@ -22,6 +22,7 @@ public final class HudModule extends Module {
 
     private final BoolSetting showArray = addSetting(new BoolSetting("Array", true));
     private final BoolSetting showNotifications = addSetting(new BoolSetting("Notifications", true));
+    private final BoolSetting showWatermark = addSetting(new BoolSetting("Watermark", true));
     private final BoolSetting showSuffixes = addSetting(new BoolSetting("Show suffixes", true));
 
     public HudModule() {
@@ -51,6 +52,10 @@ public final class HudModule extends Module {
         return showNotifications.getValue();
     }
 
+    public boolean wantsWatermark() {
+        return showWatermark.getValue();
+    }
+
     public boolean wantsSuffixes() {
         return showSuffixes.getValue();
     }
@@ -66,6 +71,9 @@ public final class HudModule extends Module {
             return false;
         }
         if (hud.wantsArray()) {
+            return true;
+        }
+        if (hud.wantsWatermark()) {
             return true;
         }
         return hud.wantsNotifications() && hasActiveNotifications();

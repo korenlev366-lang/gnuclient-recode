@@ -2,10 +2,13 @@ package gnu.client.module.modules.settings;
 
 import gnu.client.common.GnuLog;
 import gnu.client.common.OptiFineCompat;
+import gnu.client.config.ConfigManager;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.setting.BoolSetting;
+import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
+import gnu.client.util.EntityCull;
 
 import java.util.Arrays;
 
@@ -22,7 +25,19 @@ public final class PerformanceModule extends Module {
 
     public static final String NAME = "Performance";
 
+    private static final int PRESET_CUSTOM = 0;
+    private static final int PRESET_BALANCED = 1;
+    private static final int PRESET_PVP = 2;
+    private static final int PRESET_ULTRA = 3;
+
     private static PerformanceModule instance;
+
+    private boolean applyingPreset;
+
+    private final ModeSetting fpsPreset = addSetting(
+            new ModeSetting("FPS Preset", 0, Arrays.asList("Custom", "Balanced", "PvP", "Ultra"))
+                    .onChange(this::onFpsPresetChanged));
+    private final BoolSetting fastPlayerModels = addSetting(new BoolSetting("Fast Player Models", false));
 
     // Particles / weather
     private final BoolSetting reducedParticles = addSetting(new BoolSetting("Reduced Particles", false));
@@ -36,6 +51,10 @@ public final class PerformanceModule extends Module {
     private final BoolSetting reducedEntityDistance = addSetting(new BoolSetting("Reduced Entity Distance", false));
     private final SliderSetting entityDistance = addSetting(
             new SliderSetting("Entity Distance", 0.75f, 0.1f, 1.0f, 0.05f));
+    private final BoolSetting entityCull = addSetting(new BoolSetting("Entity Cull", false));
+    private final ModeSetting cullMode = addSetting(
+            new ModeSetting("Cull Mode", 0, Arrays.asList("Lite", "Aggressive"))
+                    .visibleWhen(() -> entityCull.isToggled()));
 
     // World / chunk rendering
     private final BoolSetting reducedRenderDistance = addSetting(new BoolSetting("Reduced Render Distance", false));
@@ -73,7 +92,120 @@ public final class PerformanceModule extends Module {
     public PerformanceModule() {
         super(NAME, "General client performance (vanilla MC optimizations)", Category.SETTINGS);
         instance = this;
+        wirePresetDirtyTracking();
         setEnabled(true);
+    }
+
+    private void wirePresetDirtyTracking() {
+        Runnable dirty = this::markPresetCustom;
+        entityCull.onChange(dirty);
+        cullMode.onChange(dirty);
+        reducedEntityDistance.onChange(dirty);
+        entityDistance.onChange(dirty);
+        reducedParticles.onChange(dirty);
+        particleLimit.onChange(dirty);
+        minimalParticles.onChange(dirty);
+        clearWeather.onChange(dirty);
+        cloudsOff.onChange(dirty);
+        entityShadowsOff.onChange(dirty);
+        fastGraphics.onChange(dirty);
+        noEntityNames.onChange(dirty);
+        noHurtCam.onChange(dirty);
+        viewBobbingOff.onChange(dirty);
+        skipWorldWhenGuiOpen.onChange(dirty);
+        fastPlayerModels.onChange(dirty);
+    }
+
+    private void onFpsPresetChanged() {
+        if (applyingPreset)
+            return;
+        int idx = fpsPreset.getIndex();
+        if (idx == PRESET_CUSTOM)
+            return;
+        applyFpsPreset(idx);
+    }
+
+    private void markPresetCustom() {
+        if (applyingPreset)
+            return;
+        ConfigManager cm = ConfigManager.instance();
+        if (cm != null && cm.isLoading())
+            return;
+        if (fpsPreset.getIndex() == PRESET_CUSTOM)
+            return;
+        applyingPreset = true;
+        try {
+            fpsPreset.setValue(PRESET_CUSTOM);
+        } finally {
+            applyingPreset = false;
+        }
+    }
+
+    void applyFpsPreset(int preset) {
+        applyingPreset = true;
+        try {
+            switch (preset) {
+                case PRESET_BALANCED:
+                    applyBalanced();
+                    break;
+                case PRESET_PVP:
+                    applyPvp();
+                    break;
+                case PRESET_ULTRA:
+                    applyUltra();
+                    break;
+                default:
+                    break;
+            }
+            fpsPreset.setValue(preset);
+        } finally {
+            applyingPreset = false;
+        }
+    }
+
+    private void applyBalanced() {
+        entityCull.setValue(true);
+        cullMode.setValue(0);
+        reducedEntityDistance.setValue(true);
+        entityDistance.setValue(0.75f);
+        reducedParticles.setValue(true);
+        minimalParticles.setValue(false);
+        clearWeather.setValue(true);
+        cloudsOff.setValue(true);
+        entityShadowsOff.setValue(true);
+        fastGraphics.setValue(false);
+        noEntityNames.setValue(false);
+        noHurtCam.setValue(false);
+        viewBobbingOff.setValue(false);
+        skipWorldWhenGuiOpen.setValue(false);
+        fastPlayerModels.setValue(false);
+    }
+
+    private void applyPvp() {
+        entityCull.setValue(true);
+        cullMode.setValue(1);
+        reducedEntityDistance.setValue(true);
+        entityDistance.setValue(0.5f);
+        reducedParticles.setValue(false);
+        minimalParticles.setValue(true);
+        clearWeather.setValue(true);
+        cloudsOff.setValue(true);
+        entityShadowsOff.setValue(true);
+        fastGraphics.setValue(true);
+        noEntityNames.setValue(true);
+        noHurtCam.setValue(true);
+        viewBobbingOff.setValue(true);
+        skipWorldWhenGuiOpen.setValue(true);
+        fastPlayerModels.setValue(false);
+    }
+
+    private void applyUltra() {
+        applyPvp();
+        entityDistance.setValue(0.4f);
+        particleLimit.setValue(100f);
+        minimalParticles.setValue(true);
+        reducedParticles.setValue(true);
+        fastPlayerModels.setValue(true);
     }
 
     public static PerformanceModule instance() {
@@ -114,6 +246,19 @@ public final class PerformanceModule extends Module {
     /** Fraction of the game's render distance entities are allowed to render at. */
     public static float entityDistanceFraction() {
         return instance == null ? 0.75f : instance.entityDistance.getValue();
+    }
+
+    public static boolean entityCull() {
+        return instance != null && instance.entityCull.isToggled();
+    }
+
+    /** true when Cull Mode is Aggressive (index 1). */
+    public static boolean cullModeAggressive() {
+        return instance != null && instance.cullMode.getValue() == 1;
+    }
+
+    public static float aggressiveCullDistance() {
+        return EntityCull.AGGRESSIVE_MAX_DISTANCE;
     }
 
     public static boolean reducedRenderDistance() {
@@ -250,6 +395,10 @@ public final class PerformanceModule extends Module {
 
     public static boolean boxDisplayLists() {
         return instance == null || instance.boxDisplayLists.isToggled();
+    }
+
+    public static boolean fastPlayerModels() {
+        return instance != null && instance.fastPlayerModels.isToggled();
     }
 
     @Override

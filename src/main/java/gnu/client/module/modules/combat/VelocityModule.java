@@ -100,6 +100,23 @@ public final class VelocityModule extends Module implements PacketListener {
     public final SliderSetting grimReduceJumpLimit =
             addSetting(new SliderSetting("Grim Reduce Jump Limit", 2.0f, 1.0f, 5.0f, 1.0f));
 
+    public final SliderSetting grimStartH =
+            addSetting(new SliderSetting("Grim Start Horizontal", 0.3f, 0.0f, 1.0f, 0.01f));
+    public final SliderSetting grimStartV =
+            addSetting(new SliderSetting("Grim Start Vertical", 0.0f, 0.0f, 1.0f, 0.01f));
+    public final SliderSetting grimAdaptStep =
+            addSetting(new SliderSetting("Grim Adapt Step", 0.05f, 0.01f, 0.2f, 0.01f));
+    public final SliderSetting grimMinH =
+            addSetting(new SliderSetting("Grim Min Horizontal", 0.0f, 0.0f, 1.0f, 0.01f));
+    public final SliderSetting grimMaxH =
+            addSetting(new SliderSetting("Grim Max Horizontal", 1.0f, 0.0f, 1.0f, 0.01f));
+    public final SliderSetting grimAdaptTicks =
+            addSetting(new SliderSetting("Grim Adapt Ticks", 20.0f, 5.0f, 100.0f, 1.0f));
+    public final BoolSetting grimTransactions =
+            addSetting(new BoolSetting("Grim Transactions", true));
+    public final SliderSetting grimTxDelay =
+            addSetting(new SliderSetting("Grim Tx Delay", 2.0f, 1.0f, 10.0f, 1.0f));
+
     public final BoolSetting fakeCheck =
             addSetting(new BoolSetting("Fake Check", true));
     public final BoolSetting debugLog =
@@ -136,12 +153,20 @@ public final class VelocityModule extends Module implements PacketListener {
         legitSmartJumpLimit.visibleWhen(() -> modeIs("LegitSmart"));
         intaveReduceFactor.visibleWhen(() -> modeIs("IntaveReduce"));
         intaveReduceHurtTime.visibleWhen(() -> modeIs("IntaveReduce"));
-        chance.visibleWhen(() -> modeIsAny("Legit", "LegitTest", "LegitSmart", "JumpReset"));
+        chance.visibleWhen(() -> modeIsAny("Legit", "LegitTest", "LegitSmart", "JumpReset", "Grim"));
         horizontal.visibleWhen(() -> modeIsAny("Standard", "BufferAbuse", "Redesky", "Vulcan"));
         vertical.visibleWhen(() -> modeIsAny("Standard", "BufferAbuse", "Redesky", "Vulcan"));
         explosionHorizontal.visibleWhen(() -> modeIs("Standard"));
         explosionVertical.visibleWhen(() -> modeIs("Standard"));
         grimReduceJumpLimit.visibleWhen(() -> modeIs("Grimtest"));
+        grimStartH.visibleWhen(() -> modeIs("Grim"));
+        grimStartV.visibleWhen(() -> modeIs("Grim"));
+        grimAdaptStep.visibleWhen(() -> modeIs("Grim"));
+        grimMinH.visibleWhen(() -> modeIs("Grim"));
+        grimMaxH.visibleWhen(() -> modeIs("Grim"));
+        grimAdaptTicks.visibleWhen(() -> modeIs("Grim"));
+        grimTransactions.visibleWhen(() -> modeIs("Grim"));
+        grimTxDelay.visibleWhen(() -> modeIs("Grim"));
 
         modes.add(new OMDelayVelocity(this));
         modes.add(new ReverseVelocity(this));

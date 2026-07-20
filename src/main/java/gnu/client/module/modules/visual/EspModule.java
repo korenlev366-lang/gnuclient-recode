@@ -119,6 +119,13 @@ public final class EspModule extends Module {
                 double height = data.sneaking ? 1.5 : 1.8;
                 GL11.glPushMatrix();
                 GL11.glTranslated(rx, ry + height * 0.5, rz);
+                // Same local AABB as drawFilledBoxList(0.6, height, 0.6): centered half-extents.
+                RenderHelper.drawGlowingBoundingBox(
+                        -0.3, -height * 0.5, -0.3,
+                        0.3, height * 0.5, 0.3,
+                        fr, fg, fb);
+                // Glow leaves line color at core alpha — restore soft fill color before list.
+                GL11.glColor4f(fr, fg, fb, EspDraw.DEFAULT_FILL_ALPHA);
                 RenderHelper.drawFilledBoxList(0.6f, (float) height, 0.6f);
                 GL11.glPopMatrix();
             }
@@ -141,7 +148,7 @@ public final class EspModule extends Module {
                 boxBuffer[o + 4] = (float) (ry + height);
                 boxBuffer[o + 5] = (float) (rz + 0.3);
             }
-            EspDraw.fillBatched(boxBuffer, n, fr, fg, fb, 0f);
+            EspDraw.fillBatchedWithGlow(boxBuffer, n, fr, fg, fb, 0f);
         }
 
         RenderHelper.end();

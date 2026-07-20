@@ -2,6 +2,7 @@ package gnu.client.module.setting;
 
 import com.google.gson.JsonElement;
 
+import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
 public abstract class Setting<T> {
@@ -14,6 +15,7 @@ public abstract class Setting<T> {
     private BooleanSupplier visibilityCondition;
     /** Optional live predicate — when true the setting is shown but greyed/locked. */
     private BooleanSupplier disabledCondition;
+    private Runnable changeListener;
 
     protected Setting(String name, T value) {
         this.name = name;
@@ -29,7 +31,17 @@ public abstract class Setting<T> {
     }
 
     public void setValue(T value) {
+        if (Objects.equals(this.value, value))
+            return;
         this.value = value;
+        if (changeListener != null)
+            changeListener.run();
+    }
+
+    @SuppressWarnings("unchecked")
+    public final <S extends Setting<?>> S onChange(Runnable listener) {
+        this.changeListener = listener;
+        return (S) this;
     }
 
     /**

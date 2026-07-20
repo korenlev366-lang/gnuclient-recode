@@ -1,5 +1,6 @@
 package gnu.client.ui.hud;
 
+import gnu.client.GnuClientMod;
 import gnu.client.config.ConfigManager;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
@@ -8,6 +9,7 @@ import gnu.client.module.modules.settings.ClickGuiModule;
 import gnu.client.module.modules.visual.HudModule;
 import gnu.client.ui.UiFont;
 import gnu.client.ui.UiKit;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.ScaledResolution;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.renderer.Tessellator;
@@ -31,6 +33,11 @@ import java.util.Set;
 public final class HudRenderer {
 
     private static final float ARRAY_MARGIN = 12f;
+    private static final float WM_MARGIN = ARRAY_MARGIN;
+    private static final float WM_PAD_X = 10f;
+    private static final float WM_PAD_Y = 7f;
+    private static final float WM_RADIUS = 12f;
+    private static final float WM_RIM = 1f;
     private static final float ARRAY_GAP = 3f;
     private static final float ARRAY_PAD_X = 10f;
     private static final float ARRAY_PAD_L = 9f;
@@ -137,7 +144,8 @@ public final class HudRenderer {
 
         final boolean drawArray = hud.wantsArray() && !rows.isEmpty();
         final boolean drawToasts = hud.wantsNotifications() && notifications.hasActive();
-        if (!drawArray && !drawToasts) {
+        final boolean drawWatermark = hud.wantsWatermark();
+        if (!drawArray && !drawToasts && !drawWatermark) {
             return;
         }
 
@@ -152,6 +160,9 @@ public final class HudRenderer {
                 GlStateManager.disableDepth();
                 GlStateManager.enableBlend();
                 GlStateManager.tryBlendFuncSeparate(770, 771, 1, 0);
+                if (drawWatermark) {
+                    drawWatermark(scale);
+                }
                 if (drawArray) {
                     drawArrayList(sw, scale, hud.wantsSuffixes());
                 }
@@ -353,6 +364,45 @@ public final class HudRenderer {
             return module.getName();
         }
         return module.getName() + " " + suffix;
+    }
+
+    private void drawWatermark(float scale) {
+        String brand = "Lux";
+        String ver = GnuClientMod.VERSION;
+        int fps = Minecraft.getDebugFPS();
+        String fpsText = fps + " FPS";
+        String sep = " | ";
+
+        float brandW = UiFont.width(brand);
+        float sepW = UiFont.width(sep);
+        float verW = UiFont.width(ver);
+        float fpsW = UiFont.width(fpsText);
+        float textH = UiFont.height();
+        float innerW = brandW + sepW + verW + sepW + fpsW;
+        float w = innerW + WM_PAD_X * 2f;
+        float h = textH + WM_PAD_Y * 2f;
+
+        float x = UiKit.PixelAlign.snap(WM_MARGIN, scale);
+        float y = UiKit.PixelAlign.snap(WM_MARGIN, scale);
+        w = UiKit.PixelAlign.snap(w, scale);
+        h = UiKit.PixelAlign.snap(h, scale);
+
+        UiKit.drawRoundedPanel(x - WM_RIM, y - WM_RIM, w + WM_RIM * 2f, h + WM_RIM * 2f,
+                WM_RADIUS + WM_RIM, UiKit.ACCENT);
+        UiKit.drawRoundedPanel(x, y, w, h, WM_RADIUS, UiKit.SURFACE_STRONG);
+
+        float tx = x + WM_PAD_X;
+        float ty = UiKit.PixelAlign.snap(y + (h - textH) * 0.5f, scale);
+
+        UiFont.draw(brand, tx, ty, UiKit.ACCENT);
+        tx += brandW;
+        UiFont.draw(sep, tx, ty, UiKit.MUTED_DIM);
+        tx += sepW;
+        UiFont.draw(ver, tx, ty, UiKit.MUTED);
+        tx += verW;
+        UiFont.draw(sep, tx, ty, UiKit.MUTED_DIM);
+        tx += sepW;
+        UiFont.draw(fpsText, tx, ty, UiKit.MUTED);
     }
 
     private void drawArrayList(int scaledWidth, float scale, boolean showSuffixes) {

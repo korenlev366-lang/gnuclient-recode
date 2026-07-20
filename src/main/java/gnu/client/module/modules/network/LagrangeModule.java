@@ -655,7 +655,7 @@ public final class LagrangeModule extends Module implements PacketListener {
 
     private void drawGhostBox(double rx, double ry, double rz,
                               float r, float g, float b) {
-        EspDraw.fill(
+        EspDraw.fillWithGlow(
                 rx - 0.3, ry, rz - 0.3,
                 rx + 0.3, ry + 1.8, rz + 0.3,
                 r, g, b);
