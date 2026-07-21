@@ -26,9 +26,8 @@ public abstract class MixinGuiIngame {
     )
     private ItemStack gnu$spoofHotbarCurrentItem(InventoryPlayer inventoryPlayer) {
         Object spoofed = ScaffoldItemSpoofHook.redirectCurrentItem(inventoryPlayer);
-        if (spoofed instanceof ItemStack) {
-            return (ItemStack) spoofed;
-        }
+        if (ScaffoldItemSpoofHook.isActive())
+            return (ItemStack) spoofed; // may be null — empty spoof slot must not fall back
         return inventoryPlayer.getCurrentItem();
     }
 }
