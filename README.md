@@ -2,7 +2,7 @@
 
 Minecraft 1.8.9 Forge client mod — Essential Loom + mixins + Java ClickGUI.
 
-## Build
+## build
 
 ```bash
 ./gradlew build
