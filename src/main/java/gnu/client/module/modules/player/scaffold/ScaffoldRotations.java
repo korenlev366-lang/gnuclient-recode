@@ -51,7 +51,7 @@ public final class ScaffoldRotations {
 
     public static float wrap(float a) {
         a %= 360f;
-        if (a >= 180f) a -= 360f;
+        if (a > 180f) a -= 360f;
         if (a < -180f) a += 360f;
         return a;
     }
