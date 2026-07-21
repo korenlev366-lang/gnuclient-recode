@@ -135,20 +135,27 @@ public final class ScaffoldModule extends Module {
         if (jumpHeld
                 && ScaffoldPlace.isReplaceable(world, feet)
                 && ScaffoldPlace.isValidSupport(world, underFeet)) {
-            // Tower: place UP onto the solid block under the player's feet cell.
+            // Tower: jump held + under-feet UP — overrides Telly for this tick (KeepY Off or Telly).
             liveTarget = new ScaffoldTarget(underFeet, EnumFacing.UP);
             tellyLookForward = false;
         } else if (keepY.getIndex() == KEEPY_TELLY) {
             boolean needsBridge = needsBridgeExtension(world, underFeet);
-            if ((player.onGround || player.motionY >= 0.0) && needsBridge) {
+            if (!player.onGround && player.motionY < 0.0) {
+                // Falling: aim + place under feet.
+                tellyLookForward = false;
+                liveTarget = ScaffoldPlace.findNeighborTarget(player, world, underFeet, false);
+            } else if (!player.onGround) {
+                // Rising (airborne, motionY >= 0): look forward, do not place.
                 tellyLookForward = true;
-                liveTarget = ScaffoldPlace.findNeighborTarget(player, world, underFeet, false);
-            } else if (!player.onGround && player.motionY < 0.0) {
-                tellyLookForward = false;
-                liveTarget = ScaffoldPlace.findNeighborTarget(player, world, underFeet, false);
+                liveTarget = null;
+            } else if (needsBridge) {
+                // On ground needing extension: look forward; jump via patchMovementInput.
+                tellyLookForward = true;
+                liveTarget = null;
             } else {
+                // On ground, solid footing: normal place only if somehow still needed.
                 tellyLookForward = false;
-                liveTarget = needsBridge
+                liveTarget = ScaffoldPlace.isReplaceable(world, underFeet)
                     ? ScaffoldPlace.findNeighborTarget(player, world, underFeet, false)
                     : null;
             }
@@ -265,9 +272,20 @@ public final class ScaffoldModule extends Module {
         return needsBridgeExtension(world, underFeet);
     }
 
-    /** Under feet replaceable — enough to need a bridge extension this tick. */
+    /**
+     * True when under-feet is replaceable, or the next block in movement facing
+     * (same Y as underFeet) is replaceable — imminent fall / edge.
+     */
     private static boolean needsBridgeExtension(World world, BlockPos underFeet) {
-        return ScaffoldPlace.isReplaceable(world, underFeet);
+        if (ScaffoldPlace.isReplaceable(world, underFeet))
+            return true;
+        float yaw = MoveFixUtil.movementFacingYaw();
+        double rad = Math.toRadians(yaw);
+        int ox = (int) Math.round(-Math.sin(rad));
+        int oz = (int) Math.round(Math.cos(rad));
+        if (ox == 0 && oz == 0)
+            return false;
+        return ScaffoldPlace.isReplaceable(world, underFeet.add(ox, 0, oz));
     }
 
     private static EntityPlayerSP resolvePlayer(Object playerObj) {
