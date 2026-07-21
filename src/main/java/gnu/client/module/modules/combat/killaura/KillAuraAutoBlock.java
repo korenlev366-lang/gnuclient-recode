@@ -22,7 +22,7 @@ import net.minecraft.util.Vec3;
 import java.util.Random;
 
 /**
- * OpenMyau KillAura auto-block mode switch (cases 0–9).
+ * OpenMyau KillAura auto-block mode switch (NONE–GRIM + HYPIXEL3).
  * KillAuraModule owns settings and combat gates; this helper owns block/blink state.
  */
 public final class KillAuraAutoBlock {
@@ -37,6 +37,7 @@ public final class KillAuraAutoBlock {
     public static final int LEGIT = 7;
     public static final int FAKE = 8;
     public static final int GRIM = 9;
+    public static final int HYPIXEL3 = 10;
 
     private final Random random = new Random();
 
@@ -47,6 +48,7 @@ public final class KillAuraAutoBlock {
     private boolean blinkReset;
     private int grimState;
     private int grimReleaseTick;
+    private int hypixel3Asw;
     private int lastMode = NONE;
 
     /** Inputs for one KillAura preUpdate combat tick. */
@@ -87,6 +89,7 @@ public final class KillAuraAutoBlock {
         blockTick = 0;
         grimState = 0;
         grimReleaseTick = 0;
+        hypixel3Asw = 0;
         isBlocking = false;
         fakeBlockState = false;
         if (blockingState || isPlayerBlocking())
@@ -137,11 +140,13 @@ public final class KillAuraAutoBlock {
                 isBlocking = true;
                 fakeBlockState = false;
                 blockTick = 0;
+                hypixel3Asw = 0;
             } else {
                 setAutoBlockBlink(false);
                 isBlocking = false;
                 fakeBlockState = false;
                 blockTick = 0;
+                hypixel3Asw = 0;
                 if (blockingState || isPlayerBlocking())
                     stopBlock();
             }
@@ -464,6 +469,46 @@ public final class KillAuraAutoBlock {
                         grimReleaseTick = 0;
                     }
                     break;
+                case HYPIXEL3:
+                    // wsamiaw/Cryptix: 3-tick blink-batched unblock → unblock → block cycle
+                    if (ctx.hasValidTarget) {
+                        setAutoBlockBlink(true);
+                        if (!digging && !placing) {
+                            switch (hypixel3Asw) {
+                                case 0:
+                                    if (isPlayerBlocking())
+                                        stopBlock();
+                                    attack = false;
+                                    hypixel3Asw = 1;
+                                    break;
+                                case 1:
+                                    if (isPlayerBlocking())
+                                        stopBlock();
+                                    attack = false;
+                                    hypixel3Asw = 2;
+                                    break;
+                                case 2:
+                                    if (!isPlayerBlocking())
+                                        swap = true;
+                                    blocked = true;
+                                    hypixel3Asw = 0;
+                                    break;
+                                default:
+                                    hypixel3Asw = 0;
+                                    break;
+                            }
+                        } else {
+                            attack = false;
+                        }
+                        isBlocking = true;
+                        fakeBlockState = true;
+                    } else {
+                        setAutoBlockBlink(false);
+                        isBlocking = false;
+                        fakeBlockState = false;
+                        hypixel3Asw = 0;
+                    }
+                    break;
                 default:
                     setAutoBlockBlink(false);
                     isBlocking = false;
@@ -514,7 +559,11 @@ public final class KillAuraAutoBlock {
 
     /** OpenMyau performAttack: skip when blocking and mode is not VANILLA. */
     public boolean shouldDeferAttack() {
-        return isPlayerBlocking() && lastMode != VANILLA;
+        // wsamiaw: allow attack while sword-blocking for VANILLA / GRIM / HYPIXEL3
+        return isPlayerBlocking()
+                && lastMode != VANILLA
+                && lastMode != GRIM
+                && lastMode != HYPIXEL3;
     }
 
     public long attackDelayMsWhenBlocking(float autoBlockCps) {

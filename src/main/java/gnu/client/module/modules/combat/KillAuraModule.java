@@ -15,11 +15,15 @@ import gnu.client.runtime.CombatAttackNotify;
 import gnu.client.runtime.PlayerUpdateHook;
 import gnu.client.runtime.RotationState;
 import gnu.client.runtime.mc.Mc;
+import gnu.client.runtime.packet.PacketEvents;
+import gnu.client.runtime.packet.PacketListener;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.multiplayer.WorldClient;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.network.play.server.S12PacketEntityVelocity;
+import net.minecraft.network.play.server.S27PacketExplosion;
 import net.minecraft.scoreboard.Team;
 import net.minecraft.util.MovementInput;
 
@@ -54,7 +58,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * OpenMyau's LiquidBounce rotation mode is intentionally not ported.
  * Auto-block modes are handled by {@link KillAuraAutoBlock} (default NONE).
  */
-public final class KillAuraModule extends Module {
+public final class KillAuraModule extends Module implements PacketListener {
 
     // ── Rotation modes ──────────────────────────────────────────────────
     private static final int ROT_NONE = 0;
@@ -117,12 +121,14 @@ public final class KillAuraModule extends Module {
     private final BoolSetting inventoryCheck = addSetting(new BoolSetting("InventoryCheck", true));
 
     private static final List<String> AUTO_BLOCK_MODES = Arrays.asList(
-        "NONE", "VANILLA", "SPOOF", "HYPIXEL", "BLINK", "INTERACT", "SWAP", "LEGIT", "FAKE", "GRIM");
+        "NONE", "VANILLA", "SPOOF", "HYPIXEL", "BLINK", "INTERACT", "SWAP", "LEGIT", "FAKE", "GRIM", "HYPIXEL3");
     private final ModeSetting autoBlock = addSetting(new ModeSetting("Auto-block", 0, AUTO_BLOCK_MODES));
     private final SliderSetting autoBlockCps = addSetting(new SliderSetting("AutoBlockCPS", 8.0f, 1.0f, 10.0f));
     private final SliderSetting autoBlockRange = addSetting(new SliderSetting("AutoBlockRange", 6.0f, 3.0f, 8.0f));
     private final BoolSetting autoBlockRequirePress = addSetting(new BoolSetting("AutoBlockRequirePress", false));
     private final SliderSetting grimReleaseDelay = addSetting(new SliderSetting("GrimReleaseDelay", 2.0f, 1.0f, 10.0f, 1.0f));
+    private final BoolSetting disableKeepSprintOnKb =
+            addSetting(new BoolSetting("Disable Keep Sprint On KB", true));
     private final KillAuraAutoBlock autoBlockHelper = new KillAuraAutoBlock();
 
     // ── State ─────────────────────────────────────────────────────────────
@@ -146,6 +152,7 @@ public final class KillAuraModule extends Module {
         autoBlockRange.visibleWhen(() -> autoBlock.getValue() != KillAuraAutoBlock.NONE);
         autoBlockRequirePress.visibleWhen(() -> autoBlock.getValue() != KillAuraAutoBlock.NONE);
         grimReleaseDelay.visibleWhen(() -> autoBlock.getValue() == KillAuraAutoBlock.GRIM);
+        disableKeepSprintOnKb.visibleWhen(() -> autoBlock.getValue() == KillAuraAutoBlock.HYPIXEL3);
         switchDelayMs.visibleWhen(() -> mode.getValue() == MODE_SWITCH);
         minCps.visibleWhen(() -> cpsMode.getValue() == CPS_NORMAL);
         maxCps.visibleWhen(() -> cpsMode.getValue() == CPS_NORMAL);
@@ -164,6 +171,7 @@ public final class KillAuraModule extends Module {
         lastSwitchMs = 0L;
         patternIndex = 0;
         AuraCombatPacketGuard.register();
+        PacketEvents.register(this);
     }
 
     @Override
@@ -173,6 +181,34 @@ public final class KillAuraModule extends Module {
         resetRotationState();
         autoBlockHelper.reset();
         AuraCombatPacketGuard.unregister();
+        PacketEvents.unregister(this);
+    }
+
+    @Override
+    public boolean onReceive(Object packet) {
+        if (!isEnabled() || autoBlock.getValue() != KillAuraAutoBlock.HYPIXEL3
+                || !disableKeepSprintOnKb.getValue())
+            return false;
+        EntityPlayerSP player = Mc.player();
+        if (player == null)
+            return false;
+        boolean kb = false;
+        if (packet instanceof S12PacketEntityVelocity) {
+            if (((S12PacketEntityVelocity) packet).getEntityID() == player.getEntityId())
+                kb = true;
+        } else if (packet instanceof S27PacketExplosion) {
+            S27PacketExplosion ex = (S27PacketExplosion) packet;
+            if (ex.func_149149_c() != 0.0F || ex.func_149144_d() != 0.0F || ex.func_149147_e() != 0.0F)
+                kb = true;
+        }
+        if (kb)
+            player.setSprinting(false);
+        return false;
+    }
+
+    @Override
+    public boolean onSend(Object packet) {
+        return false;
     }
 
     @Override
