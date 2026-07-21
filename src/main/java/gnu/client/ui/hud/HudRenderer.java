@@ -367,7 +367,7 @@ public final class HudRenderer {
     }
 
     private void drawWatermark(float scale) {
-        String brand = "Lux";
+        String brand = "gnuclient";
         String ver = GnuClientMod.VERSION;
         int fps = Minecraft.getDebugFPS();
         String fpsText = fps + " FPS";
