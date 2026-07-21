@@ -81,9 +81,11 @@ public final class PlayerUpdateHook {
             return;
         KillAuraModule.onBeforeWalkingPrepare(player);
         KillAuraModule.onBeforeWalkingAttack(player);
-        ScaffoldModule.onBeforeWalkingPlace(player);
+        // Swap silent look before Scaffold place so raycast/right-click use override yaw/pitch.
+        // KA attack already wrote its own temps; Scaffold ensureRotationApplied is idempotent.
         if (overrideActive)
             beginRotationSwap(player);
+        ScaffoldModule.onBeforeWalkingPlace(player);
     }
 
     /** True between {@link #beginRotationSwap} and {@code onUpdate} return — rotation sent/will send this tick. */

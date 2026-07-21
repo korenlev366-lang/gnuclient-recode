@@ -1,5 +1,6 @@
 package gnu.client.module.modules.player.scaffold;
 
+import gnu.client.mixin.impl.accessors.IAccessorPlayerControllerMP;
 import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
@@ -10,6 +11,7 @@ import gnu.client.runtime.PlayerUpdateHook;
 import gnu.client.runtime.RotationState;
 import gnu.client.runtime.mc.Mc;
 import net.minecraft.client.entity.EntityPlayerSP;
+import net.minecraft.client.multiplayer.PlayerControllerMP;
 import net.minecraft.client.multiplayer.WorldClient;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.BlockPos;
@@ -82,6 +84,13 @@ public final class ScaffoldModule extends Module {
             return;
         if (Mc.getHotbarSlot(player) != spoofSlot)
             Mc.setHotbarSlot(player, spoofSlot);
+        setControllerCurrentItem(spoofSlot);
+    }
+
+    private static void setControllerCurrentItem(int slot) {
+        PlayerControllerMP controller = Mc.controller();
+        if (controller instanceof IAccessorPlayerControllerMP)
+            ((IAccessorPlayerControllerMP) controller).setCurrentPlayerItem(slot);
     }
 
     public static void onPreUpdate(Object player) {
@@ -210,14 +219,27 @@ public final class ScaffoldModule extends Module {
         EntityPlayerSP player = resolvePlayer(playerObj);
         if (player == null)
             return;
+
+        // KA/Displace owns look — do not place with a foreign silent rotation.
+        if (RotationState.isActived()
+                && (int) RotationState.getPriority() != MoveFixUtil.SCAFFOLD_MOVE_FIX_PRIORITY)
+            return;
+
         WorldClient world = Mc.world();
         if (world == null || Mc.controller() == null)
             return;
 
-        boolean switched = false;
-        if (Mc.getHotbarSlot(player) != placeSlot) {
-            Mc.setHotbarSlot(player, placeSlot);
-            switched = true;
+        if (Mc.accessor().getRightClickDelayTimer() > 0)
+            return;
+
+        // Silent yaw/pitch must be on the entity for raycast + right-click (idempotent if already swapped).
+        PlayerUpdateHook.ensureRotationApplied(player);
+
+        boolean switchSlots = placeSlot != spoofSlot;
+        if (switchSlots) {
+            if (Mc.getHotbarSlot(player) != placeSlot)
+                Mc.setHotbarSlot(player, placeSlot);
+            setControllerCurrentItem(placeSlot);
         }
 
         float yaw = lastSentYaw != Float.MIN_VALUE
@@ -230,8 +252,11 @@ public final class ScaffoldModule extends Module {
         Vec3 hit = ScaffoldPlace.findPlacementHit(
             player, liveTarget.support, liveTarget.face, yaw, pitch);
         if (hit == null) {
-            if (switched)
-                restoreHotbarToSpoof();
+            if (switchSlots) {
+                if (Mc.getHotbarSlot(player) != spoofSlot)
+                    Mc.setHotbarSlot(player, spoofSlot);
+                setControllerCurrentItem(spoofSlot);
+            }
             return;
         }
 
@@ -240,9 +265,13 @@ public final class ScaffoldModule extends Module {
             Mc.controller().onPlayerRightClick(
                 player, world, stack, liveTarget.support, liveTarget.face, hit);
             player.swingItem();
+            Mc.setRightClickDelay(4);
         }
-        if (Mc.getHotbarSlot(player) != spoofSlot)
-            Mc.setHotbarSlot(player, spoofSlot);
+        if (switchSlots) {
+            if (Mc.getHotbarSlot(player) != spoofSlot)
+                Mc.setHotbarSlot(player, spoofSlot);
+            setControllerCurrentItem(spoofSlot);
+        }
     }
 
     private void doPatchMovementInput(Object movInput) {
