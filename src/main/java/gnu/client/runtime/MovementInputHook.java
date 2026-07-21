@@ -5,7 +5,6 @@ import gnu.client.module.modules.combat.MoreKBModule;
 import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.module.modules.combat.WTapModule;
 import gnu.client.module.modules.movement.StasisModule;
-import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.script.ScriptManager;
 
 /**
@@ -20,7 +19,6 @@ public final class MovementInputHook {
         VelocityModule.patchMovementInput(movementInput);
         WTapModule.patchMovementInput(movementInput);
         MoreKBModule.patchMovementInput(movementInput);
-        ScaffoldModule.patchMovementInput(movementInput);
         KillAuraModule.patchMovementInput(movementInput);
         ScriptManager.instance().patchMovementInput(movementInput);
         StasisModule.patchPlayerInput(movementInput);

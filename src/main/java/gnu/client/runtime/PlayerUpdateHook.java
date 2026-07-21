@@ -4,7 +4,6 @@ import gnu.client.mixin.impl.accessors.IAccessorEntityPlayerSP;
 import gnu.client.module.modules.combat.DisplaceModule;
 import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.movement.StasisModule;
-import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.runtime.mc.Mc;
 import net.minecraft.client.entity.EntityPlayerSP;
 
@@ -40,7 +39,6 @@ public final class PlayerUpdateHook {
 
         clearRotationOverride();
         StasisModule.onPreUpdate(player);
-        ScaffoldModule.onPreUpdate(player);
         DisplaceModule.onPreUpdate(player);
         KillAuraModule.onPreUpdate(player);
         return false;
@@ -81,8 +79,6 @@ public final class PlayerUpdateHook {
             return;
         KillAuraModule.onBeforeWalkingPrepare(player);
         KillAuraModule.onBeforeWalkingAttack(player);
-        // Scaffold last: C09+C08 then C03 with place look (1.8 Grim Post / RotationPlace queue).
-        ScaffoldModule.onBeforeWalkingPlace(player);
         if (overrideActive)
             beginRotationSwap(player);
     }

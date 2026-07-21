@@ -30,7 +30,6 @@ import gnu.client.module.modules.player.BridgeAssistModule;
 import gnu.client.module.modules.player.DelayRemoverModule;
 import gnu.client.module.modules.player.FastPlaceModule;
 import gnu.client.module.modules.player.NoSlowModule;
-import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.module.impl.client.Settings;
 import gnu.client.module.modules.settings.ClickGuiModule;
 import gnu.client.module.modules.settings.ConfigManagerModule;
@@ -117,7 +116,6 @@ public class GnuClientMod {
         safeRegister(new DisplaceModule());
         safeRegister(new FastPlaceModule());
         safeRegister(new DelayRemoverModule());
-        safeRegister(new ScaffoldModule());
         safeRegister(new StasisModule());
         safeRegister(new AntiBotModule());
         safeRegister(new AimAssistModule());

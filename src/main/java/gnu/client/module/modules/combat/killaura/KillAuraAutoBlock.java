@@ -5,7 +5,6 @@ import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.modules.network.LagrangeModule;
 import gnu.client.module.modules.player.NoSlowModule;
-import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.runtime.BlinkManager;
 import gnu.client.runtime.BlinkModules;
 import gnu.client.runtime.mc.Mc;
@@ -700,7 +699,7 @@ public final class KillAuraAutoBlock {
 
     private static boolean isPlacing() {
         Module module = ModuleManager.INSTANCE.getModule("Scaffold");
-        return module instanceof ScaffoldModule && module.isEnabled();
+        return module != null && module.isEnabled();
     }
 
     private static boolean isUseKeyDown() {

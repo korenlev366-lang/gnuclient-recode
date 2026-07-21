@@ -12,7 +12,6 @@
     "client.MixinMinecraft",
     "client.MixinMovementInputFromOptions",
     "render.MixinEntityRenderer",
-    "render.MixinGuiIngame",
     "render.MixinRenderManager",
     "render.MixinRenderManagerCull",
     "render.MixinLayerArmorBase",
