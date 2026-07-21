@@ -265,6 +265,11 @@ public final class KillAuraModule extends Module implements PacketListener {
             && ka.autoBlockHelper.isBlockingSession();
     }
 
+    /** Auto-block mode index for cross-module coordination (e.g. NoSlow Grim). */
+    public int getAutoBlockMode() {
+        return autoBlock.getValue();
+    }
+
     public static void onPreUpdate(Object player) {
         Module module = ModuleManager.instance().getModule("KillAura");
         if (module instanceof KillAuraModule && module.isEnabled())

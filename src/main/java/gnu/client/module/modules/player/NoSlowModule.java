@@ -4,6 +4,7 @@ import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.modules.combat.KillAuraModule;
+import gnu.client.module.modules.combat.killaura.KillAuraAutoBlock;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
@@ -14,12 +15,13 @@ import net.minecraft.item.EnumAction;
 import net.minecraft.item.ItemPotion;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.play.client.C09PacketHeldItemChange;
+import net.minecraft.util.MovementInput;
 
 import java.util.Arrays;
 import java.util.List;
 
 /**
- * NoSlow — OpenMyau settings/API with wsamiaw Grim slot-spoof behavior.
+ * NoSlow — OpenMyau settings with wsamiaw Grim C09 slot-spoof (+ optional killaura-only).
  */
 public final class NoSlowModule extends Module {
 
@@ -42,19 +44,24 @@ public final class NoSlowModule extends Module {
     private final SliderSetting bowMotion = addSetting(new SliderSetting("bow-motion", 100f, 0f, 100f, 1f));
     private final BoolSetting bowSprint = addSetting(new BoolSetting("bow-sprint", true));
 
+    /** wsamiaw swap-slot — alternate C09 target while Grim spoofing. */
+    private final SliderSetting swapSlot = addSetting(new SliderSetting("swap-slot", 1f, 0f, 8f, 1f));
+
     private boolean spoofingSlot;
     private boolean toggleSlot;
     private int lastSentSlot = -1;
 
     public NoSlowModule() {
         super("NoSlow", "Cancel item-use slowdown (sword/food/bow)", Category.PLAYER);
-        swordMotion.visibleWhen(() -> swordMode.getValue() == MODE_VANILLA);
+        // wsamiaw: motion/sprint visible whenever mode != NONE (including GRIM)
+        swordMotion.visibleWhen(() -> swordMode.getValue() != MODE_NONE);
         swordSprint.visibleWhen(() -> swordMode.getValue() != MODE_NONE);
         killAuraOnly.visibleWhen(() -> swordMode.getValue() != MODE_NONE);
-        foodMotion.visibleWhen(() -> foodMode.getValue() == MODE_VANILLA);
+        foodMotion.visibleWhen(() -> foodMode.getValue() != MODE_NONE);
         foodSprint.visibleWhen(() -> foodMode.getValue() != MODE_NONE);
-        bowMotion.visibleWhen(() -> bowMode.getValue() == MODE_VANILLA);
+        bowMotion.visibleWhen(() -> bowMode.getValue() != MODE_NONE);
         bowSprint.visibleWhen(() -> bowMode.getValue() != MODE_NONE);
+        swapSlot.visibleWhen(() -> swordMode.getValue() == MODE_GRIM || foodMode.getValue() == MODE_GRIM);
     }
 
     public static NoSlowModule instance() {
@@ -101,12 +108,7 @@ public final class NoSlowModule extends Module {
     }
 
     public int getMotionMultiplier() {
-        if (isGrimMode()) {
-            if (Mc.isHoldingSword())
-                return Math.round(swordMotion.getValue());
-            if (isEating())
-                return Math.round(foodMotion.getValue());
-        }
+        // Match wsamiaw: prefer held-item type, not special-cased Grim branch.
         if (Mc.isHoldingSword())
             return Math.round(swordMotion.getValue());
         if (isEating())
@@ -114,6 +116,26 @@ public final class NoSlowModule extends Module {
         if (Mc.isHoldingBow())
             return Math.round(bowMotion.getValue());
         return 100;
+    }
+
+    /**
+     * wsamiaw LivingUpdate: scale move input by motion % and optionally clear sprint.
+     * Called after vanilla use-slow is suppressed by {@link gnu.client.mixin.impl.entity.MixinEntityPlayerSPNoSlow}.
+     */
+    public void applyLivingUpdateNoSlow() {
+        if (!isEnabled() || !isAnyActive())
+            return;
+        EntityPlayerSP player = Mc.player();
+        if (player == null)
+            return;
+        MovementInput input = player.movementInput;
+        if (input == null)
+            return;
+        float multiplier = getMotionMultiplier() / 100.0f;
+        input.moveForward *= multiplier;
+        input.moveStrafe *= multiplier;
+        if (!canSprint())
+            player.setSprinting(false);
     }
 
     @Override
@@ -128,7 +150,8 @@ public final class NoSlowModule extends Module {
 
     @Override
     public void onTickStart() {
-        if (isGrimMode() && Mc.isUsingItem() && !KillAuraModule.isAutoBlockHandlingBlock()) {
+        // wsamiaw: skip C09 spoof only when KillAura autoblock is GRIM (owns block packets).
+        if (isGrimMode() && Mc.isUsingItem() && !killAuraGrimAutoBlockOwns()) {
             updateGrimSlotSpoof();
         } else {
             resetSlotSpoof();
@@ -138,10 +161,14 @@ public final class NoSlowModule extends Module {
     @Override
     public void onTick() {}
 
-    /**
-     * wsamiaw Grim NoSlow: alternate C09 selected slot while using the item so Grim's
-     * slot-change check keeps the NoSlow flag from accumulating.
-     */
+    /** wsamiaw: {@code killAura.autoBlock == GRIM} only — not every AB session. */
+    private static boolean killAuraGrimAutoBlockOwns() {
+        Module module = ModuleManager.instance().getModule("KillAura");
+        if (!(module instanceof KillAuraModule) || !module.isEnabled())
+            return false;
+        return ((KillAuraModule) module).getAutoBlockMode() == KillAuraAutoBlock.GRIM;
+    }
+
     private void updateGrimSlotSpoof() {
         EntityPlayerSP player = Mc.player();
         if (player == null)
@@ -152,7 +179,7 @@ public final class NoSlowModule extends Module {
             toggleSlot = true;
             lastSentSlot = -1;
         }
-        int target = nextGrimSlot(item, swapSlot(), toggleSlot, lastSentSlot);
+        int target = nextGrimSlot(item, Math.round(swapSlot.getValue()), toggleSlot, lastSentSlot);
         PacketUtils.sendPacketNoEvent(new C09PacketHeldItemChange(target));
         lastSentSlot = target;
         toggleSlot = !toggleSlot;
@@ -170,15 +197,6 @@ public final class NoSlowModule extends Module {
         lastSentSlot = -1;
     }
 
-    private int swapSlot() {
-        int slot = 1;
-        Module module = ModuleManager.instance().getModule("NoSlow");
-        if (module instanceof NoSlowModule) {
-            // Existing wsamiaw default is slot 1; keep the same default without adding a GUI setting.
-        }
-        return slot;
-    }
-
     static int nextGrimSlot(int currentSlot, int swapSlot, boolean toggle, int lastSentSlot) {
         int target = toggle ? swapSlot : currentSlot;
         if (target == lastSentSlot)
@@ -186,10 +204,6 @@ public final class NoSlowModule extends Module {
         return target;
     }
 
-    /**
-     * OpenMyau {@code ItemUtil.isEating} — EAT/DRINK use action, splash potions excluded.
-     * Does not require {@code isUsingItem} (gated by {@link #isAnyActive}).
-     */
     static boolean isEating() {
         EntityPlayerSP player = Mc.player();
         if (player == null)
@@ -197,7 +211,6 @@ public final class NoSlowModule extends Module {
         return isEatingStack(player.getHeldItem());
     }
 
-    /** OpenMyau eating check on a held stack (no using-item gate). */
     public static boolean isEatingStack(ItemStack itemStack) {
         if (itemStack == null)
             return false;
@@ -205,10 +218,6 @@ public final class NoSlowModule extends Module {
         return matchesEatingUseAction(itemStack.getItemUseAction(), splash);
     }
 
-    /**
-     * Pure OpenMyau eating predicate for unit tests.
-     * Splash potions never count; otherwise EAT or DRINK.
-     */
     public static boolean matchesEatingUseAction(EnumAction action, boolean splashPotion) {
         if (splashPotion)
             return false;
