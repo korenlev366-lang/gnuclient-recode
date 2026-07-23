@@ -56,6 +56,11 @@ public final class ScaffoldRotations {
         return a;
     }
 
+    /** Unwrap {@code to} onto the continuous branch of {@code from} (Grim-safe). */
+    public static float continuous(float from, float to) {
+        return from + wrap(to - from);
+    }
+
     public static float clampPitch(float p) {
         return Math.max(-90f, Math.min(90f, p));
     }

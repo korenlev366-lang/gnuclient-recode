@@ -18,6 +18,15 @@ public interface IAccessorEntityPlayerSP {
     @Accessor("lastReportedPitch")
     void setLastReportedPitch(float pitch);
 
+    @Accessor("lastReportedPosX")
+    double getLastReportedPosX();
+
+    @Accessor("lastReportedPosY")
+    double getLastReportedPosY();
+
+    @Accessor("lastReportedPosZ")
+    double getLastReportedPosZ();
+
     @Accessor("serverSprintState")
     boolean getServerSprintState();
 

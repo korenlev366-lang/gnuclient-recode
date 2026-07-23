@@ -64,6 +64,24 @@ public final class PlayerUpdateHook {
         return Mc.getYaw();
     }
 
+    /**
+     * Real camera yaw even while {@link #beginRotationSwap} has written silent look onto
+     * {@code player.rotationYaw}. {@link MoveFixUtil#movementFacingYaw()} must use this —
+     * after swap, {@link Mc#getYaw()} is the packet look and breaks Scaffold hardAway
+     * (awayAbs≈0 → WALK hang skip; HEAD still works).
+     */
+    public static float cameraYaw() {
+        if (pendingRestore)
+            return pendingYaw;
+        return Mc.getYaw();
+    }
+
+    public static float cameraPitch() {
+        if (pendingRestore)
+            return pendingPitch;
+        return Mc.getPitch();
+    }
+
     public static float lastReportedYaw(Object player) {
         if (!(player instanceof IAccessorEntityPlayerSP))
             return 0.0f;
@@ -102,6 +120,7 @@ public final class PlayerUpdateHook {
         if (!isLocal(player))
             return;
         KillAuraModule.onAfterWalking(player);
+        ScaffoldModule.onAfterWalking(player);
     }
 
     /** Apply requested silent rotation to the local player before block placement. */

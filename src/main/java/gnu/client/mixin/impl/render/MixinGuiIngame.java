@@ -9,9 +9,10 @@ import net.minecraftforge.fml.relauncher.SideOnly;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.objectweb.asm.Opcodes;
 
 /**
- * Scaffold item-spoof hotbar display (OpenMyau GuiIngame parity).
+ * Scaffold item-spoof hotbar display — redirect only, never mutates {@code currentItem}.
  */
 @SideOnly(Side.CLIENT)
 @Mixin(value = GuiIngame.class, priority = 9999)
@@ -25,9 +26,24 @@ public abstract class MixinGuiIngame {
             )
     )
     private ItemStack gnu$spoofHotbarCurrentItem(InventoryPlayer inventoryPlayer) {
-        Object spoofed = ScaffoldItemSpoofHook.redirectCurrentItem(inventoryPlayer);
         if (ScaffoldItemSpoofHook.isActive())
-            return (ItemStack) spoofed; // may be null — empty spoof slot must not fall back
+            return ScaffoldItemSpoofHook.redirectCurrentItem(inventoryPlayer);
         return inventoryPlayer.getCurrentItem();
+    }
+
+    /** Selection diamond stays on the pre-Scaffold slot (sword, etc.). */
+    @Redirect(
+            method = "renderTooltip",
+            at = @At(
+                    value = "FIELD",
+                    target = "Lnet/minecraft/entity/player/InventoryPlayer;currentItem:I",
+                    opcode = Opcodes.GETFIELD
+            )
+    )
+    private int gnu$spoofHotbarSelectedSlot(InventoryPlayer inventoryPlayer) {
+        int spoof = ScaffoldItemSpoofHook.getSpoofSlot();
+        if (spoof >= 0)
+            return spoof;
+        return inventoryPlayer.currentItem;
     }
 }

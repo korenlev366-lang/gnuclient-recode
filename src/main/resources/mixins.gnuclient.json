@@ -20,6 +20,7 @@
     "render.MixinRenderNames",
     "render.MixinEffectRenderer",
     "render.MixinItemRendererAnimations",
+    "render.MixinItemRendererScaffoldSpoof",
     "accessors.IAccessorMinecraft",
     "accessors.IAccessorTimer",
     "accessors.IAccessorEntityPlayerSP",

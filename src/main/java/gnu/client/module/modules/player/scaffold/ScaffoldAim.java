@@ -108,7 +108,12 @@ public final class ScaffoldAim {
             default: {
                 float yaw = backwardsYaw(moveYaw);
                 float pitch = pitchToward(aimPoint, player, baseYaw, basePitch);
-                return new float[] { yaw, pitch };
+                if (ScaffoldPlace.findPlacementHit(player, target.support, target.face, yaw, pitch) != null)
+                    return new float[] { yaw, pitch };
+                // Prefer a hit that stays looking away from movement (not snap-to-forward).
+                float[] hit = ScaffoldPlace.findHittingLook(
+                    player, target.support, target.face, yaw, pitch, moveYaw, true);
+                return hit != null ? hit : new float[] { yaw, pitch };
             }
         }
     }
@@ -127,8 +132,14 @@ public final class ScaffoldAim {
             yaw = yawRight;
         else if (hitLeft && !hitRight)
             yaw = yawLeft;
-        else
-            yaw = godBridgeYaw(moveYaw, preferGodBridgeRight());
+        else if (hitRight)
+            yaw = preferGodBridgeRight() ? yawRight : yawLeft;
+        else {
+            float prefer = godBridgeYaw(moveYaw, preferGodBridgeRight());
+            float[] hit = ScaffoldPlace.findHittingLook(
+                player, target.support, target.face, prefer, pitch);
+            return hit != null ? hit : new float[] { prefer, pitch };
+        }
         return new float[] { yaw, pitch };
     }
 

@@ -122,7 +122,7 @@ Tower (jump held + under-feet place) works in both modes without extra motion ha
 
 ### Sprint
 
-- v1: do not add Scaffold sprint force/suppress modes; leave vanilla / Sprint module alone unless MoveFix requires sprint key untouched.
+- v1: **do not sprint while Scaffold is enabled** (walk bridge). Suppress sprint key + `setSprinting(false)`. Sprint module yields to Scaffold.
 
 ## Files (expected)
 

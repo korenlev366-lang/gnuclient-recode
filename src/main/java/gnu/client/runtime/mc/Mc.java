@@ -176,6 +176,10 @@ public final class Mc {
         accessor().setRightClickDelayTimer(0);
     }
 
+    public static int getRightClickDelay() {
+        return accessor().getRightClickDelayTimer();
+    }
+
     public static void setRightClickDelay(int delay) {
         accessor().setRightClickDelayTimer(delay);
     }

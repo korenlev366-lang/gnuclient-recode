@@ -80,7 +80,8 @@ public final class MoveFixUtil {
 
     /** Camera + WASD → world movement facing (matches OpenMyau {@code adjustYaw} + keys). */
     public static float movementFacingYaw() {
-        return adjustYaw(Mc.getYaw(), forwardKeyValue(), leftKeyValue());
+        // During onUpdateWalkingPlayer silent swap, Mc.getYaw() is packet look — use camera.
+        return adjustYaw(PlayerUpdateHook.cameraYaw(), forwardKeyValue(), leftKeyValue());
     }
 
     private static int forwardKeyValue() {
