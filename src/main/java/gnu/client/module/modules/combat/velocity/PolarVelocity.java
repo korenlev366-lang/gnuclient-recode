@@ -13,4 +13,12 @@ public final class PolarVelocity extends VelocityMode {
     public PolarVelocity(VelocityModule parent) {
         super("Polar", parent);
     }
+
+    /** Polar + ReduceJump both use the {@code 0.59928} hit-slow constant while hurt. */
+    public static boolean usesPolarHitSlow(VelocityModule velocity) {
+        if (velocity == null || !velocity.isEnabled())
+            return false;
+        String mode = velocity.mode.getCurrentMode();
+        return "Polar".equals(mode) || "ReduceJump".equals(mode);
+    }
 }

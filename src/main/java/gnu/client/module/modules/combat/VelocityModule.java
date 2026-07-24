@@ -23,6 +23,7 @@ import gnu.client.module.modules.combat.velocity.MMCVelocity;
 import gnu.client.module.modules.combat.velocity.MatrixVelocity;
 import gnu.client.module.modules.combat.velocity.OMDelayVelocity;
 import gnu.client.module.modules.combat.velocity.PolarVelocity;
+import gnu.client.module.modules.combat.velocity.ReduceJumpVelocity;
 import gnu.client.module.modules.combat.velocity.RedeskyVelocity;
 import gnu.client.module.modules.combat.velocity.ReverseVelocity;
 import gnu.client.module.modules.combat.velocity.StandardVelocity;
@@ -66,7 +67,7 @@ public final class VelocityModule extends Module implements PacketListener {
             "OMDelay", "Reverse", "LegitTest", "LegitSmart", "IntaveReduce", "Grimtest", "JumpReset",
             "Standard", "AAC", "Bounce", "BufferAbuse", "Delay", "Grim", "GrimReduce", "Ground", "Intave",
             "Karhu", "Legit", "MMC", "Matrix", "Redesky", "Tick", "UniversoCraft", "Vulcan",
-            "WatchdogPrediction", "Watchdog", "AttackReduce", "Polar"));
+            "WatchdogPrediction", "Watchdog", "AttackReduce", "Polar", "ReduceJump"));
 
     // ── Settings (public final — modes read directly) ─────────────────────
 
@@ -130,6 +131,19 @@ public final class VelocityModule extends Module implements PacketListener {
     public final BoolSetting onlyWhileMoving =
             addSetting(new BoolSetting("Only While Moving", true));
 
+    /** ReduceJump — jump-reset while hurt. */
+    public final BoolSetting reduceJumpDoJump =
+            addSetting(new BoolSetting("Jump Reset", true));
+    /** ReduceJump — max extra C02s per hurt window. */
+    public final SliderSetting reduceJumpAttacks =
+            addSetting(new SliderSetting("Reduce Attacks", 3.0f, 1.0f, 10.0f, 1.0f));
+    /** ReduceJump — C02s sent per tick while looking at a player. */
+    public final SliderSetting reduceJumpPerTick =
+            addSetting(new SliderSetting("Attacks Per Tick", 1.0f, 1.0f, 3.0f, 1.0f));
+    /** ReduceJump — send C0A with each reduce attack. */
+    public final BoolSetting reduceJumpSwing =
+            addSetting(new BoolSetting("Swing", true));
+
     // ── Shared state (OpenMiau Velocity.java parity) ──────────────────────
 
     public int chanceCounter;
@@ -159,7 +173,7 @@ public final class VelocityModule extends Module implements PacketListener {
         legitSmartJumpLimit.visibleWhen(() -> modeIs("LegitSmart"));
         intaveReduceFactor.visibleWhen(() -> modeIs("IntaveReduce"));
         intaveReduceHurtTime.visibleWhen(() -> modeIs("IntaveReduce"));
-        chance.visibleWhen(() -> modeIsAny("Legit", "LegitTest", "LegitSmart", "JumpReset", "Grim", "AttackReduce"));
+        chance.visibleWhen(() -> modeIsAny("Legit", "LegitTest", "LegitSmart", "JumpReset", "Grim", "AttackReduce", "ReduceJump"));
         horizontal.visibleWhen(() -> modeIsAny("Standard", "BufferAbuse", "Redesky", "Vulcan"));
         vertical.visibleWhen(() -> modeIsAny("Standard", "BufferAbuse", "Redesky", "Vulcan"));
         explosionHorizontal.visibleWhen(() -> modeIs("Standard"));
@@ -174,6 +188,10 @@ public final class VelocityModule extends Module implements PacketListener {
         grimTransactions.visibleWhen(() -> modeIs("Grim"));
         grimTxDelay.visibleWhen(() -> modeIs("Grim"));
         onlyWhileMoving.visibleWhen(() -> modeIs("AttackReduce"));
+        reduceJumpDoJump.visibleWhen(() -> modeIs("ReduceJump"));
+        reduceJumpAttacks.visibleWhen(() -> modeIs("ReduceJump"));
+        reduceJumpPerTick.visibleWhen(() -> modeIs("ReduceJump"));
+        reduceJumpSwing.visibleWhen(() -> modeIs("ReduceJump"));
 
         modes.add(new OMDelayVelocity(this));
         modes.add(new ReverseVelocity(this));
@@ -203,6 +221,7 @@ public final class VelocityModule extends Module implements PacketListener {
         modes.add(new WatchdogVelocity(this));
         modes.add(new AttackReduceVelocity(this));
         modes.add(new PolarVelocity(this));
+        modes.add(new ReduceJumpVelocity(this));
     }
 
     public VelocityMode getActiveMode() {

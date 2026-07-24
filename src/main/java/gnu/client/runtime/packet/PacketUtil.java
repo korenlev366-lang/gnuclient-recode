@@ -4,6 +4,7 @@ import gnu.client.common.GnuLog;
 import gnu.client.runtime.mc.Mc;
 import net.minecraft.client.network.NetHandlerPlayClient;
 import net.minecraft.network.Packet;
+import net.minecraft.network.ThreadQuickExitException;
 import net.minecraft.network.play.client.C0APacketAnimation;
 
 import java.util.Collections;
@@ -69,6 +70,9 @@ public final class PacketUtil {
         try {
             DISPATCHING.set(Boolean.TRUE);
             ((Packet) packet).processPacket(netHandler);
+        } catch (ThreadQuickExitException ignored) {
+            // Vanilla PacketThreadUtil: off-thread processPacket schedules onto the client
+            // thread then throws this. Packet still runs — do not log as an error.
         } catch (Throwable t) {
             GnuLog.log("JAVA_ PacketUtil.processInbound: " + t);
         } finally {

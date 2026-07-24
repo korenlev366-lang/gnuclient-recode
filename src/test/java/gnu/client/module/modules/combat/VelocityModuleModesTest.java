@@ -20,11 +20,12 @@ public class VelocityModuleModesTest {
                 mode = (ModeSetting) s;
         }
         assertNotNull(mode);
-        assertEquals(28, mode.getModes().size());
+        assertEquals(29, mode.getModes().size());
         assertEquals("Standard", mode.getCurrentMode());
         assertEquals(7, mode.getIndex());
         assertTrue(mode.getModes().contains("AttackReduce"));
         assertTrue(mode.getModes().contains("Polar"));
+        assertTrue(mode.getModes().contains("ReduceJump"));
 
         VelocityMode active = v.getActiveMode();
         assertNotNull(active);

@@ -5,7 +5,9 @@ import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.event.JumpEvent;
 import gnu.client.event.PreAttackEvent;
+import gnu.client.event.PreSlotScrollEvent;
 import gnu.client.event.RightClickMouseEvent;
+import gnu.client.event.SlotUpdateEvent;
 import gnu.client.event.StrafeEvent;
 import gnu.client.module.modules.combat.AntiBotModule;
 import gnu.client.module.modules.combat.DisplaceModule;
@@ -13,6 +15,7 @@ import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.module.modules.combat.RavenAntiBot;
 import gnu.client.module.modules.combat.ReachModule;
+import gnu.client.module.modules.player.BedNukerModule;
 import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.module.modules.network.LagrangeModule;
 import gnu.client.module.modules.settings.ConfigManagerModule;
@@ -123,7 +126,8 @@ public final class ClientEventListener {
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public void onPreAttack(PreAttackEvent event) {
         if (KillAuraModule.shouldCancelVanillaClick()
-                || ScaffoldModule.shouldCancelVanillaClick())
+                || ScaffoldModule.shouldCancelVanillaClick()
+                || BedNukerModule.shouldCancelVanillaClick())
             event.setCanceled(true);
     }
 
@@ -132,7 +136,20 @@ public final class ClientEventListener {
         // OpenMyau/wsamiaw: Scaffold owns places — vanilla RMB while KeepY-on-press (sword
         // spoof) sends USE_ITEM / air place then C09 → Grim PacketOrderE/N + place flags.
         if (KillAuraModule.shouldCancelVanillaClick()
-                || ScaffoldModule.shouldCancelVanillaClick())
+                || ScaffoldModule.shouldCancelVanillaClick()
+                || BedNukerModule.shouldCancelVanillaClick())
+            event.setCanceled(true);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void onPreSlotScroll(PreSlotScrollEvent event) {
+        if (BedNukerModule.shouldCancelSlotChange())
+            event.setCanceled(true);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void onSlotUpdate(SlotUpdateEvent event) {
+        if (BedNukerModule.shouldCancelSlotChange())
             event.setCanceled(true);
     }
 

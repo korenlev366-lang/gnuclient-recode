@@ -4,6 +4,7 @@ import gnu.client.mixin.impl.accessors.IAccessorEntityPlayerSP;
 import gnu.client.module.modules.combat.DisplaceModule;
 import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.movement.StasisModule;
+import gnu.client.module.modules.player.BedNukerModule;
 import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.runtime.mc.Mc;
 import net.minecraft.client.entity.EntityPlayerSP;
@@ -43,6 +44,8 @@ public final class PlayerUpdateHook {
         ScaffoldModule.onPreUpdate(player);
         DisplaceModule.onPreUpdate(player);
         KillAuraModule.onPreUpdate(player);
+        // After KA so BedNuker priority 5 can own look while breaking.
+        BedNukerModule.onPreUpdate(player);
         return false;
     }
 

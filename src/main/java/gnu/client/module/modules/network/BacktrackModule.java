@@ -7,7 +7,6 @@ import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.mc.Mc;
 import gnu.client.runtime.packet.PacketEvents;
-import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketListener;
 import gnu.client.runtime.packet.InboundLagCoordinator;
 import gnu.client.runtime.packet.PacketUtil;
@@ -22,18 +21,9 @@ import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.network.Packet;
 import net.minecraft.network.play.client.C02PacketUseEntity;
-import net.minecraft.network.play.server.S00PacketKeepAlive;
-import net.minecraft.network.play.server.S03PacketTimeUpdate;
-import net.minecraft.network.play.server.S06PacketUpdateHealth;
 import net.minecraft.network.play.server.S08PacketPlayerPosLook;
-import net.minecraft.network.play.server.S12PacketEntityVelocity;
 import net.minecraft.network.play.server.S14PacketEntity;
 import net.minecraft.network.play.server.S18PacketEntityTeleport;
-import net.minecraft.network.play.server.S19PacketEntityStatus;
-import net.minecraft.network.play.server.S27PacketExplosion;
-import net.minecraft.network.play.server.S29PacketSoundEffect;
-import net.minecraft.network.play.server.S0CPacketSpawnPlayer;
-import net.minecraft.network.play.server.S3EPacketTeams;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -41,13 +31,12 @@ import java.util.List;
 /**
  * gnuclient-recode BackTrack — attack-driven, players-only.
  *
- * <p>While inside the post-attack window ({@code HurtTime} ms), the whole inbound stream
- * (minus hard exempts) is delayed by {@code currentDelay} ms rolled from
- * {@code MinDelay}–{@code MaxDelay}. Packets are timestamped and released FIFO when aged —
- * not held until the window ends. Delaying the full stream keeps hitboxes/metadata in sync
- * (target-only position delay flags). {@code HurtTime} only controls how long after a hit we
- * keep applying that delay; 0ms Min/Max is passthrough. Optional {@code Smart Flush} dumps the
- * queue when true server pos is closer than the lagged entity (old gnu Advanced).
+ * <p>While inside the post-attack window ({@code HurtTime} ms), only entity position packets
+ * ({@link S14PacketEntity} / {@link S18PacketEntityTeleport}) are delayed by {@code currentDelay}
+ * ms rolled from {@code MinDelay}–{@code MaxDelay}. Packets are timestamped and released FIFO
+ * when aged. {@code HurtTime} only controls how long after a hit we keep applying that delay;
+ * 0ms Min/Max is passthrough. Optional {@code Smart Flush} dumps the queue when true server pos
+ * is closer than the lagged entity (old gnu Advanced).
  */
 public final class BacktrackModule extends Module implements PacketListener {
 
@@ -60,10 +49,6 @@ public final class BacktrackModule extends Module implements PacketListener {
     private final BoolSetting esp = addSetting(new BoolSetting("Esp", true));
     /** Flush when true server pos is closer than the lagged entity (old gnu Advanced smart flush). */
     private final BoolSetting smartFlush = addSetting(new BoolSetting("Smart Flush", true));
-    private final BoolSetting packetVelocity = addSetting(new BoolSetting("Velocity", true));
-    private final BoolSetting packetVelocityExplosion = addSetting(new BoolSetting("ExplosionVelocity", true));
-    private final BoolSetting packetTimeUpdate = addSetting(new BoolSetting("TimeUpdate", true));
-    private final BoolSetting packetKeepAlive = addSetting(new BoolSetting("KeepAlive", true));
 
     private final List<QueuedPacket> packets = new ArrayList<>();
     /** The entity you last attacked — BackTrack only ever tracks this (players only),
@@ -438,38 +423,9 @@ public final class BacktrackModule extends Module implements PacketListener {
         return v < min ? min : (v > max ? max : v);
     }
 
-    /**
-     * Whole-inbound delay (keeps hitboxes/metadata aligned with lagged positions).
-     * Hard exempts only: transactions, setback, disconnect, chat, health, hurt-status.
-     * Optional toggles can leave time/keepalive/explosion/velocity live.
-     */
+    /** Only relative/absolute entity position updates — enough to hold a lagged hitbox. */
     private boolean shouldQueue(Object packet) {
-        if (PacketHelper.isServerConfirmTransaction(packet)
-                || PacketHelper.isClientConfirmTransaction(packet))
-            return false;
-        if (PacketHelper.isPlayerPosLook(packet) || PacketHelper.isDisconnect(packet))
-            return false;
-        if (PacketHelper.isChat(packet) || PacketHelper.isUpdateHealth(packet))
-            return false;
-        // Hurt status must stay live or KillAura swing/Post flags break.
-        if (packet instanceof S19PacketEntityStatus
-                && ((S19PacketEntityStatus) packet).getOpCode() == 2)
-            return false;
-
-        if (packet instanceof S03PacketTimeUpdate)
-            return packetTimeUpdate.getValue();
-        if (packet instanceof S00PacketKeepAlive)
-            return packetKeepAlive.getValue();
-        if (packet instanceof S27PacketExplosion)
-            return packetVelocityExplosion.getValue();
-        if (packet instanceof S12PacketEntityVelocity)
-            return packetVelocity.getValue();
-
-        // Everything else in the inbound stream (all entities' move/meta/spawn/etc.).
-        return !(packet instanceof S06PacketUpdateHealth)
-                && !(packet instanceof S29PacketSoundEffect)
-                && !(packet instanceof S3EPacketTeams)
-                && !(packet instanceof S0CPacketSpawnPlayer);
+        return packet instanceof S14PacketEntity || packet instanceof S18PacketEntityTeleport;
     }
 
     /** Live MinDelay–MaxDelay roll (0 when either end is 0 and both ≤ 0). */

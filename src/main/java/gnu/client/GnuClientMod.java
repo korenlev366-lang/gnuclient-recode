@@ -17,6 +17,7 @@ import gnu.client.module.modules.combat.DisplaceModule;
 import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.module.modules.combat.WTapModule;
 import gnu.client.module.modules.movement.FastStopModule;
+import gnu.client.module.modules.movement.KeepSprintModule;
 import gnu.client.module.modules.movement.SprintModule;
 import gnu.client.module.modules.movement.StasisModule;
 import gnu.client.module.modules.movement.TimerModule;
@@ -26,10 +27,15 @@ import gnu.client.module.modules.network.KnockbackDelayModule;
 import gnu.client.module.modules.network.LagrangeModule;
 import gnu.client.module.modules.network.PingFixModule;
 import gnu.client.module.modules.player.AutoPlaceModule;
+import gnu.client.module.modules.player.AutoToolModule;
+import gnu.client.module.modules.player.BedNukerModule;
 import gnu.client.module.modules.player.BridgeAssistModule;
+import gnu.client.module.modules.player.ChestStealerModule;
 import gnu.client.module.modules.player.DelayRemoverModule;
 import gnu.client.module.modules.player.FastPlaceModule;
+import gnu.client.module.modules.player.InvManagerModule;
 import gnu.client.module.modules.player.NoSlowModule;
+import gnu.client.module.modules.player.SpeedMineModule;
 import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.module.impl.client.Settings;
 import gnu.client.module.modules.settings.ClickGuiModule;
@@ -60,7 +66,7 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
 public class GnuClientMod {
 
     public static final String MOD_ID = "gnuclient";
-    public static final String VERSION = "2.1.0";
+    public static final String VERSION = "2.2.0";
 
     public static GnuClientMod instance;
     public static ModuleManager moduleManager;
@@ -108,6 +114,7 @@ public class GnuClientMod {
         safeRegister(new WTapModule());
         safeRegister(new MoreKBModule());
         safeRegister(new SprintModule());
+        safeRegister(new KeepSprintModule());
         safeRegister(new NoSlowModule());
         safeRegister(new AutoPlaceModule());
         safeRegister(new BridgeAssistModule());
@@ -116,6 +123,11 @@ public class GnuClientMod {
         safeRegister(new VelocityModule());
         safeRegister(new DisplaceModule());
         safeRegister(new FastPlaceModule());
+        safeRegister(new AutoToolModule());
+        safeRegister(new InvManagerModule());
+        safeRegister(new ChestStealerModule());
+        safeRegister(new BedNukerModule());
+        safeRegister(new SpeedMineModule());
         safeRegister(new DelayRemoverModule());
         safeRegister(new ScaffoldModule());
         safeRegister(new StasisModule());

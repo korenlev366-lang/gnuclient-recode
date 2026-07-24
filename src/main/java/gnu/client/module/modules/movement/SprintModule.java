@@ -11,9 +11,9 @@ import net.minecraft.client.entity.EntityPlayerSP;
  * Auto-sprint via sprint keybind (OpenMyau {@code Sprint}).
  *
  * <p>Holds the sprint key every tick START so sprint persists through jumps.
- * Yields to {@link WTapModule} and {@link ScaffoldModule}.
- * Does <b>not</b> yield to KillAura — OpenMyau Sprint keeps the key held through
- * hits so living re-sprints.
+ * Yields to {@link WTapModule}, {@link KeepSprintModule} gap ticks, and
+ * {@link ScaffoldModule}. Does <b>not</b> yield to KillAura — OpenMyau Sprint
+ * keeps the key held through hits so living re-sprints.
  */
 public final class SprintModule extends Module {
 
@@ -36,7 +36,9 @@ public final class SprintModule extends Module {
         EntityPlayerSP player = Mc.player();
         if (player == null)
             return;
-        if (WTapModule.shouldSuppressSprintKey() || ScaffoldModule.shouldSuppressSprint()) {
+        if (WTapModule.shouldSuppressSprintKey()
+                || KeepSprintModule.shouldSuppressSprintKey()
+                || ScaffoldModule.shouldSuppressSprint()) {
             Mc.setSprintKeyState(false);
             return;
         }

@@ -16,6 +16,12 @@ public interface IAccessorPlayerControllerMP {
     @Accessor("isHittingBlock")
     boolean getIsHittingBlock();
 
+    @Accessor("curBlockDamageMP")
+    float getCurBlockDamageMP();
+
+    @Accessor("curBlockDamageMP")
+    void setCurBlockDamageMP(float damage);
+
     @Accessor("currentPlayerItem")
     int getCurrentPlayerItem();
 

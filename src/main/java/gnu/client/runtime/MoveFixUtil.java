@@ -21,6 +21,8 @@ public final class MoveFixUtil {
     public static final int KILLAURA_MOVE_FIX_PRIORITY = 1;
     public static final int DISPLACE_MOVE_FIX_PRIORITY = 2;
     public static final int SCAFFOLD_MOVE_FIX_PRIORITY = 3;
+    /** wsamiaw BedNuker rotation priority (above combat/scaffold). */
+    public static final int BED_NUKER_MOVE_FIX_PRIORITY = 5;
 
     private MoveFixUtil() {}
 

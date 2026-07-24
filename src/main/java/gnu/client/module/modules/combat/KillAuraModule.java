@@ -8,6 +8,7 @@ import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.module.modules.combat.killaura.KillAuraAutoBlock;
 import gnu.client.module.modules.network.LagrangeModule;
+import gnu.client.module.modules.movement.KeepSprintModule;
 import gnu.client.module.modules.network.BacktrackModule;
 import gnu.client.runtime.MoveFixUtil;
 import gnu.client.runtime.AuraCombatPacketGuard;
@@ -241,6 +242,21 @@ public final class KillAuraModule extends Module implements PacketListener {
         if (!(module instanceof KillAuraModule) || !module.isEnabled())
             return null;
         return ((KillAuraModule) module).attackTarget;
+    }
+
+    /**
+     * True when KA has a target and the look used for C02 raycasts onto that hitbox
+     * (same gate as {@link #canAttackThisTick}).
+     */
+    public static boolean lookRayHitsCurrentTarget() {
+        Module module = ModuleManager.instance().getModule("KillAura");
+        if (!(module instanceof KillAuraModule) || !module.isEnabled())
+            return false;
+        KillAuraModule ka = (KillAuraModule) module;
+        EntityPlayerSP player = Mc.player();
+        if (player == null || ka.attackTarget == null)
+            return false;
+        return ka.lookHitsAttackTarget(player, ka.attackRange.getValue());
     }
 
     /**
@@ -722,6 +738,9 @@ public final class KillAuraModule extends Module implements PacketListener {
             return false;
         // Grim PacketOrderI: C07 RELEASE then C02 same tick → type=attack, releasing=true.
         if (AuraCombatPacketGuard.shouldSkipAttackForReleaseOrder())
+            return false;
+        // KeepSprint Packet/Full: wait until after STOP flying clears lastSprinting.
+        if (KeepSprintModule.shouldDeferAttack())
             return false;
 
         long now = System.currentTimeMillis();
