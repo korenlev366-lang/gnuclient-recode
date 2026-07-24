@@ -68,7 +68,8 @@ public class ClickGuiLayoutTest {
         assertEquals(8, layout.get(Category.COMBAT).getX());
         assertEquals(37, layout.get(Category.COMBAT).getY());
         assertTrue(layout.get(Category.COMBAT).isOpen());
-        assertEquals(176, layout.get(Category.PLAYER).getX());
+        assertEquals(8 + Category.MOVEMENT.ordinal() * 168, layout.get(Category.MOVEMENT).getX());
+        assertEquals(8 + Category.PLAYER.ordinal() * 168, layout.get(Category.PLAYER).getX());
         assertNotNull(layout.get(Category.SCRIPTS));
     }
 

@@ -3,6 +3,7 @@ package gnu.client.runtime;
 import gnu.client.mixin.impl.accessors.IAccessorEntityPlayerSP;
 import gnu.client.module.modules.combat.DisplaceModule;
 import gnu.client.module.modules.combat.KillAuraModule;
+import gnu.client.module.modules.combat.TimerRangeModule;
 import gnu.client.module.modules.movement.StasisModule;
 import gnu.client.module.modules.player.BedNukerModule;
 import gnu.client.module.modules.player.scaffold.ScaffoldModule;
@@ -39,6 +40,12 @@ public final class PlayerUpdateHook {
         if (local == null || sp != local)
             return false;
 
+        // raven Timer@0: keep global timer at 1, skip local update so GUI/keybinds stay live.
+        if (TimerRangeModule.shouldSkipLocalUpdate()) {
+            syncPrevRenderState(sp);
+            return true;
+        }
+
         clearRotationOverride();
         StasisModule.onPreUpdate(player);
         ScaffoldModule.onPreUpdate(player);
@@ -47,6 +54,18 @@ public final class PlayerUpdateHook {
         // After KA so BedNuker priority 5 can own look while breaking.
         BedNukerModule.onPreUpdate(player);
         return false;
+    }
+
+    /** Prevent render jitter while local onUpdate is cancelled. */
+    private static void syncPrevRenderState(EntityPlayerSP p) {
+        p.prevPosX = p.posX;
+        p.prevPosY = p.posY;
+        p.prevPosZ = p.posZ;
+        p.prevRotationYaw = p.rotationYaw;
+        p.prevRotationPitch = p.rotationPitch;
+        p.prevRenderYawOffset = p.renderYawOffset;
+        p.prevRotationYawHead = p.rotationYawHead;
+        p.prevLimbSwingAmount = p.limbSwingAmount;
     }
 
     public static void requestRotation(float yaw, float pitch) {

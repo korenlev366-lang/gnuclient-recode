@@ -19,11 +19,13 @@ public final class TimerModule extends Module {
             addSetting(new SliderSetting("Speed", 1.0f, 0.0f, 2.0f, 0.01f));
 
     public TimerModule() {
-        super("Timer", "Change game tick speed", Category.PLAYER);
+        super("Timer", "Change game tick speed", Category.MOVEMENT);
     }
 
-    /** Safety net — restore vanilla speed when the module is off. */
+    /** Safety net — restore vanilla speed when neither Timer nor TimerRange owns it. */
     public static void maintain() {
+        if (gnu.client.module.modules.combat.TimerRangeModule.isControllingTimer())
+            return;
         Module module = ModuleManager.INSTANCE.getModule("Timer");
         if (!(module instanceof TimerModule) || !module.isEnabled())
             Mc.resetTimer();

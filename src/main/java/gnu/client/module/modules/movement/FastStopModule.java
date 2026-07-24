@@ -33,7 +33,7 @@ public final class FastStopModule extends Module {
     private int holdRightTicks;
 
     public FastStopModule() {
-        super("Instant Stop", "Stop instantly by counter-strafing", Category.PLAYER);
+        super("Instant Stop", "Stop instantly by counter-strafing", Category.MOVEMENT);
     }
 
     @Override

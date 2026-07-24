@@ -366,8 +366,10 @@ public final class CategoryColumn {
         switch (category) {
             case COMBAT:
                 return "Fighting tools";
+            case MOVEMENT:
+                return "Speed & motion";
             case PLAYER:
-                return "Movement & place";
+                return "Inventory & place";
             case VISUALS:
                 return "HUD & world";
             case MISC:

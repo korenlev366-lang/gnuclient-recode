@@ -52,7 +52,7 @@ public final class KeepSprintModule extends Module {
     private int hitReadyTicks;
 
     public KeepSprintModule() {
-        super("KeepSprint", "Keeps sprint momentum through hits (Grim packet-gap modes)", Category.PLAYER);
+        super("KeepSprint", "Keeps sprint momentum through hits (Grim packet-gap modes)", Category.MOVEMENT);
         unsafeRetain.visibleWhen(() -> mode.getIndex() == MODE_UNSAFE);
     }
 

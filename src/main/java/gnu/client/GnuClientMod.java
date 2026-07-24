@@ -14,6 +14,7 @@ import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.combat.MoreKBModule;
 import gnu.client.module.modules.combat.ReachModule;
 import gnu.client.module.modules.combat.DisplaceModule;
+import gnu.client.module.modules.combat.TimerRangeModule;
 import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.module.modules.combat.WTapModule;
 import gnu.client.module.modules.movement.FastStopModule;
@@ -66,7 +67,7 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
 public class GnuClientMod {
 
     public static final String MOD_ID = "gnuclient";
-    public static final String VERSION = "2.2.1";
+    public static final String VERSION = "2.3.0";
 
     public static GnuClientMod instance;
     public static ModuleManager moduleManager;
@@ -121,6 +122,7 @@ public class GnuClientMod {
         safeRegister(new FastStopModule());
         safeRegister(new TimerModule());
         safeRegister(new VelocityModule());
+        safeRegister(new TimerRangeModule());
         safeRegister(new DisplaceModule());
         safeRegister(new FastPlaceModule());
         safeRegister(new AutoToolModule());

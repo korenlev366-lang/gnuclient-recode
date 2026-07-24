@@ -16,7 +16,7 @@ import net.minecraft.util.MovementInput;
 public final class StasisModule extends Module implements PacketListener {
 
     public StasisModule() {
-        super("Stasis", "Freeze movement", Category.PLAYER);
+        super("Stasis", "Freeze movement", Category.MOVEMENT);
     }
 
     @Override

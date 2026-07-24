@@ -18,7 +18,7 @@ import net.minecraft.client.entity.EntityPlayerSP;
 public final class SprintModule extends Module {
 
     public SprintModule() {
-        super("Sprint", "Auto-sprint via keybind (packet-safe)", Category.PLAYER);
+        super("Sprint", "Auto-sprint via keybind (packet-safe)", Category.MOVEMENT);
     }
 
     @Override
