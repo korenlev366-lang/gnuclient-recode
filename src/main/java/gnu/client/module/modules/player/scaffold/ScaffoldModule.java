@@ -36,11 +36,15 @@ public final class ScaffoldModule extends Module {
 
     private static final int KEEPY_OFF = 0;
     private static final int KEEPY_TELLY = 1;
+    /** wsamiaw EXTRATELLY — Telly + EXTRA mid-air keep-Y clutch. */
+    private static final int KEEPY_EXTRATELLY = 2;
 
     private final ModeSetting aim = addSetting(new ModeSetting("Aim", ScaffoldAim.AIM_BACKWARDS,
         Arrays.asList("Backwards", "GodBridge", "Nearest", "Sideways")));
     private final ModeSetting keepY = addSetting(new ModeSetting("KeepY", KEEPY_OFF,
-        Arrays.asList("Off", "Telly")));
+        Arrays.asList("Off", "Telly", "ExtraTelly")));
+    /** wsamiaw keep-y-on-press: KeepY only while use-item key (RMB) is held. */
+    private final BoolSetting keepYOnPress = addSetting(new BoolSetting("KeepY on press", false));
     private final SliderSetting rotMin = addSetting(new SliderSetting("Rotation min", 60f, 1f, 100f, 1f));
     private final SliderSetting rotMax = addSetting(new SliderSetting("Rotation max", 80f, 1f, 100f, 1f));
     private final BoolSetting placeDebug = addSetting(new BoolSetting("Place debug", false));
@@ -69,6 +73,11 @@ public final class ScaffoldModule extends Module {
      */
     private int tellyStartY = Integer.MIN_VALUE;
     /**
+     * wsamiaw {@code shouldKeepY}: ExtraTelly mid-air clutch — place at live under-feet
+     * while falling back onto the keep-Y row.
+     */
+    private boolean shouldKeepY;
+    /**
      * After Telly turn-back from look-forward, brief place delay unless look already rays.
      */
     private int tellyRotationTick;
@@ -83,6 +92,35 @@ public final class ScaffoldModule extends Module {
 
     public ScaffoldModule() {
         super("Scaffold", "Silent bridge scaffold with item spoof", Category.PLAYER);
+        keepYOnPress.visibleWhen(() -> keepY.getIndex() != KEEPY_OFF);
+    }
+
+    /** Telly or ExtraTelly mode selected. */
+    private boolean isTellyKeepY() {
+        int i = keepY.getIndex();
+        return i == KEEPY_TELLY || i == KEEPY_EXTRATELLY;
+    }
+
+    private boolean isExtraTelly() {
+        return keepY.getIndex() == KEEPY_EXTRATELLY;
+    }
+
+    /**
+     * wsamiaw KeepY stage gate: mode on, not holding jump, and if on-press then RMB held
+     * ({@code PlayerUtil.isUsingItem} = use-key down with no screen).
+     */
+    private boolean isKeepYArmed() {
+        if (!isTellyKeepY())
+            return false;
+        if (Mc.isJumpKeyHeld())
+            return false;
+        if (keepYOnPress.getValue()) {
+            if (Mc.currentScreen() != null)
+                return false;
+            if (!Mc.isUseItemKeyDown())
+                return false;
+        }
+        return true;
     }
 
     @Override
@@ -99,11 +137,29 @@ public final class ScaffoldModule extends Module {
         lastPlacedPos = null;
         tellyLookForward = false;
         tellyStartY = Integer.MIN_VALUE;
+        shouldKeepY = false;
         tellyRotationTick = 0;
         tellyWasLookingForward = false;
         liveTarget = null;
         towering = false;
         placedThisTick = false;
+        // Clear sword-block / use so the first C09 is not during rightClicking.
+        releaseUseIfNeeded(p);
+    }
+
+    /**
+     * OpenMyau: cancel vanilla attack / RMB while Scaffold is on so KeepY-on-press can
+     * read the use key without sending USE_ITEM (PacketOrderE/N).
+     */
+    public static boolean shouldCancelVanillaClick() {
+        Module module = ModuleManager.instance().getModule("Scaffold");
+        return module instanceof ScaffoldModule && module.isEnabled();
+    }
+
+    private static void releaseUseIfNeeded(EntityPlayerSP player) {
+        if (player == null || !Mc.isUsingItem(player))
+            return;
+        Mc.stopSwordBlock(player);
     }
 
     /**
@@ -127,6 +183,7 @@ public final class ScaffoldModule extends Module {
         lastPlacedPos = null;
         tellyLookForward = false;
         tellyStartY = Integer.MIN_VALUE;
+        shouldKeepY = false;
         tellyRotationTick = 0;
         tellyWasLookingForward = false;
         towering = false;
@@ -168,15 +225,24 @@ public final class ScaffoldModule extends Module {
     }
 
     /**
-     * Block under the bridge row. KeepY Telly locks to {@link #tellyStartY} - 1 while at/above
-     * that row (OpenMyau startY); below it, clutch at live under-feet.
+     * Block under the bridge row. KeepY Telly/ExtraTelly locks to {@link #tellyStartY} - 1
+     * while at/above that row (OpenMyau startY); ExtraTelly {@link #shouldKeepY} targets
+     * {@code floor(posY) - 1} — one block above the keep-Y bridge (wsamiaw EXTRA clutch);
+     * below keep row, clutch at live under-feet.
      */
     private BlockPos bridgeUnder(EntityPlayerSP player) {
         BlockPos live = ScaffoldPlace.underFeet(player);
         if (player == null || live == null)
             return live;
-        if (keepY.getIndex() != KEEPY_TELLY || tellyStartY == Integer.MIN_VALUE)
+        if (!isKeepYArmed() || tellyStartY == Integer.MIN_VALUE)
             return live;
+        // wsamiaw getBlockData when shouldKeepY: targetY = floor(posY) - 1 (elevated pad).
+        if (shouldKeepY) {
+            return new BlockPos(
+                MathHelper.floor_double(player.posX),
+                MathHelper.floor_double(player.posY) - 1,
+                MathHelper.floor_double(player.posZ));
+        }
         BlockPos keep = new BlockPos(
             MathHelper.floor_double(player.posX),
             tellyStartY - 1,
@@ -184,6 +250,20 @@ public final class ScaffoldModule extends Module {
         if (live.getY() >= keep.getY())
             return keep;
         return live;
+    }
+
+    /**
+     * wsamiaw EXTRA/EXTRATELLY clutch target — prefer UP onto the keep-Y bridge so the
+     * placed block sits one above and you land higher.
+     */
+    private ScaffoldTarget findExtraKeepYTarget(EntityPlayerSP player, World world,
+            BlockPos underFeet, float moveYaw) {
+        EnumFacing moveFace = ScaffoldPlace.yawToFacing(moveYaw);
+        ScaffoldTarget up = ScaffoldPlace.findNeighborTarget(
+            player, world, underFeet, true, moveFace);
+        if (up != null)
+            return up;
+        return ScaffoldPlace.findBridgeTarget(player, world, underFeet, moveYaw);
     }
 
     private void clearRotationIfOwned() {
@@ -200,9 +280,8 @@ public final class ScaffoldModule extends Module {
     }
 
     /**
-     * Keep gameplay on {@code slot}. Use real {@code syncCurrentPlayItem} so C09 is sent
-     * whenever the controller disagrees — never force {@code currentPlayerItem} first
-     * (that skipped C09 and left the server on the sword → ghost places).
+     * Keep gameplay on {@code slot}. Sync only when the controller disagrees — a redundant
+     * C09 after a place/use in the same tick is Grim PacketOrderE (rightClicking=true).
      */
     private void selectHotbarSlot(EntityPlayerSP player, int slot, boolean syncServer) {
         if (player == null || slot < 0 || slot > 8)
@@ -212,8 +291,11 @@ public final class ScaffoldModule extends Module {
         if (!syncServer)
             return;
         PlayerControllerMP controller = Mc.controller();
-        if (controller instanceof IAccessorPlayerControllerMP)
-            ((IAccessorPlayerControllerMP) controller).invokeSyncCurrentPlayItem();
+        if (controller instanceof IAccessorPlayerControllerMP) {
+            IAccessorPlayerControllerMP acc = (IAccessorPlayerControllerMP) controller;
+            if (acc.getCurrentPlayerItem() != slot)
+                acc.invokeSyncCurrentPlayItem();
+        }
         serverSlot = slot;
     }
 
@@ -262,6 +344,9 @@ public final class ScaffoldModule extends Module {
             return;
         }
 
+        // KeepY-on-press holds RMB — release any leftover use before C09/place.
+        releaseUseIfNeeded(player);
+
         // OpenMyau: gameplay stays on the block stack; render spoof shows spoofSlot.
         selectHotbarSlot(player, placeSlot, true);
 
@@ -280,10 +365,14 @@ public final class ScaffoldModule extends Module {
             lastPlacedPos = null;
         }
 
-        if (player.onGround)
-            tellyStartY = MathHelper.floor_double(player.posY);
-        else if (keepY.getIndex() != KEEPY_TELLY)
+        // wsamiaw: on ground refresh startY unless EXTRA clutch kept it; clear shouldKeepY.
+        if (player.onGround) {
+            if (!shouldKeepY)
+                tellyStartY = MathHelper.floor_double(player.posY);
+            shouldKeepY = false;
+        } else if (!isKeepYArmed()) {
             tellyStartY = Integer.MIN_VALUE;
+        }
 
         BlockPos underFeet = bridgeUnder(player);
         boolean jumpHeld = Mc.isJumpKeyHeld()
@@ -291,12 +380,13 @@ public final class ScaffoldModule extends Module {
         float moveYaw = MoveFixUtil.movementFacingYaw();
         boolean hanging = ScaffoldPlace.isReplaceable(world, underFeet);
         boolean edgeCritical = isEdgeCritical(player, world, underFeet);
+        boolean keepYArmed = isKeepYArmed();
 
         towering = false;
         // Telly sets movementInput.jump for auto-hop — that must NOT enter the tower branch
         // (it was clearing tellyLookForward every jump → instant turn-back).
         boolean towerJump = Mc.isJumpKeyHeld();
-        if (jumpHeld && !towerJump && keepY.getIndex() == KEEPY_TELLY)
+        if (jumpHeld && !towerJump && keepYArmed)
             jumpHeld = false; // ignore telly-injected jump for look/tower state
         if (jumpHeld || towerJump) {
             liveTarget = ScaffoldPlace.findTowerTarget(player, world);
@@ -304,10 +394,8 @@ public final class ScaffoldModule extends Module {
             towering = liveTarget != null && liveTarget.face == EnumFacing.UP;
             if (liveTarget == null)
                 liveTarget = ScaffoldPlace.findBridgeTarget(player, world, underFeet, moveYaw);
-        } else if (keepY.getIndex() == KEEPY_TELLY) {
-            // Telly look: forward through the rise, turn back near apex (not the instant
-            // airborne snap — that felt like rapid back-and-forth). Place still uses
-            // OpenMyau-style current-eye hit after turn-back (+ short rotationTick).
+        } else if (keepYArmed) {
+            // Telly / ExtraTelly look: forward through the rise, turn back near apex.
             if (tellyRotationTick > 0)
                 tellyRotationTick--;
             boolean needsBridge = needsBridgeExtension(world, underFeet);
@@ -336,6 +424,24 @@ public final class ScaffoldModule extends Module {
             }
             if (tellyLookForward)
                 tellyWasLookingForward = true;
+
+            // wsamiaw EXTRA/EXTRATELLY: at end of jump, place one block ABOVE keep-Y
+            // (UP onto the bridge) so you land higher and cover more distance.
+            if (isExtraTelly() && !player.onGround && tellyStartY != Integer.MIN_VALUE) {
+                int nextBlockY = MathHelper.floor_double(player.posY + player.motionY);
+                if (nextBlockY <= tellyStartY && player.posY > (double) (tellyStartY + 1)) {
+                    shouldKeepY = true;
+                    underFeet = bridgeUnder(player);
+                    hanging = ScaffoldPlace.isReplaceable(world, underFeet);
+                    edgeCritical = isEdgeCritical(player, world, underFeet);
+                    tellyLookForward = false;
+                    tellyRotationTick = 0;
+                    liveTarget = findExtraKeepYTarget(player, world, underFeet, moveYaw);
+                    placeDebugLog("EXTRA clutch under=" + underFeet
+                            + " startY=" + tellyStartY
+                            + " tgt=" + formatTarget(liveTarget));
+                }
+            }
         } else {
             tellyLookForward = false;
             tellyRotationTick = 0;
@@ -497,7 +603,8 @@ public final class ScaffoldModule extends Module {
                 placePhase = "HEAD";
                 // OpenMyau waits rotationTick before place, but with sprint we overshoot.
                 // Place early once turn-back look already rays the target from current eyes.
-                boolean tellyWait = keepY.getIndex() == KEEPY_TELLY && tellyRotationTick > 0
+                // ExtraTelly elevated clutch must not wait on telly turn-back.
+                boolean tellyWait = isKeepYArmed() && !shouldKeepY && tellyRotationTick > 0
                         && !tellyLookReady(player, liveTarget);
                 if (tellyWait) {
                     placeDebugLog("HEAD telly wait rotationTick=" + tellyRotationTick
@@ -568,7 +675,7 @@ public final class ScaffoldModule extends Module {
 
         placePhase = "WALK";
 
-        if (keepY.getIndex() == KEEPY_TELLY && tellyRotationTick > 0
+        if (isKeepYArmed() && !shouldKeepY && tellyRotationTick > 0
                 && !tellyLookReady(player, liveTarget)) {
             placeDebugLog("WALK telly wait rotationTick=" + tellyRotationTick
                     + " under=" + underFeet);
@@ -646,24 +753,32 @@ public final class ScaffoldModule extends Module {
             placeDebugLog("hang stop solid-under under=" + underFeet);
             return;
         }
-        liveTarget = ScaffoldPlace.findBridgeTarget(
-            player, world, underFeet, MoveFixUtil.movementFacingYaw());
+        float moveYaw = MoveFixUtil.movementFacingYaw();
+        // ExtraTelly elevated pad: prefer UP onto keep-Y (one block above).
+        if (shouldKeepY)
+            liveTarget = findExtraKeepYTarget(player, world, underFeet, moveYaw);
+        else
+            liveTarget = ScaffoldPlace.findBridgeTarget(player, world, underFeet, moveYaw);
         if (liveTarget == null) {
             placeDebugLog("hang stop resolve under=" + underFeet + " tgt=null");
             return;
         }
-        // Reject UP on the keep-Y row (wrong tower into jump). Allow UP only as emergency
-        // clutch after falling below keep-Y (log: hang stop UP → void).
+        // Reject UP on the keep-Y row (wrong tower into jump), except ExtraTelly clutch
+        // which intentionally places UP for the elevated landing pad, or void recovery.
         if (liveTarget.face == EnumFacing.UP) {
+            boolean extraClutch = shouldKeepY;
             boolean belowKeep = tellyStartY != Integer.MIN_VALUE
                     && underFeet.getY() < tellyStartY - 1;
-            if (!belowKeep) {
+            if (!extraClutch && !belowKeep) {
                 placeDebugLog("hang stop resolve under=" + underFeet
                         + " tgt=" + formatTarget(liveTarget) + " (UP)");
                 return;
             }
-            placeDebugLog("hang allow UP recovery under=" + underFeet
-                    + " keepStartY=" + tellyStartY);
+            placeDebugLog("hang allow UP "
+                    + (extraClutch ? "extra-clutch" : "recovery")
+                    + " under=" + underFeet + " keepStartY=" + tellyStartY);
+            // UP place is not a hard-away bridge click.
+            hardAway = false;
         }
         if (!tryPlaceOnce(player, world, underFeet, true, hardAway)) {
             placeDebugLog("hang FAIL under=" + underFeet + " tgt=" + formatTarget(liveTarget));
@@ -952,7 +1067,7 @@ public final class ScaffoldModule extends Module {
     }
 
     private boolean shouldTellyJump(EntityPlayerSP player) {
-        if (player == null || keepY.getIndex() != KEEPY_TELLY)
+        if (player == null || !isKeepYArmed())
             return false;
         // OpenMyau: only force jump while forward keys are held — never while idle.
         if (!player.onGround || placeSlot < 0 || !MoveFixUtil.isForwardPressed())

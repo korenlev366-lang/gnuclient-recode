@@ -6,9 +6,11 @@ import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.modules.settings.ClickGuiModule;
 import gnu.client.runtime.ClientBootstrap;
+import gnu.client.module.modules.visual.HudModule;
 import gnu.client.ui.UiBlur;
 import gnu.client.ui.UiFont;
 import gnu.client.ui.UiKit;
+import gnu.client.ui.hud.HudTargetHud;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.ScaledResolution;
 import net.minecraft.client.renderer.GlStateManager;
@@ -190,6 +192,12 @@ public class ClickGuiScreen extends GuiScreen {
                 }
             }
         });
+
+        // Target HUD preview on top of columns (screen-space, not GUI-scaled).
+        HudModule hud = HudModule.instance();
+        if (hud != null && hud.isEnabled() && hud.wantsTargetHud()) {
+            HudTargetHud.instance().render(sr);
+        }
 
         super.drawScreen(mouseX, mouseY, partialTicks);
     }

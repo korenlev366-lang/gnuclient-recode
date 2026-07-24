@@ -145,7 +145,8 @@ public final class HudRenderer {
         final boolean drawArray = hud.wantsArray() && !rows.isEmpty();
         final boolean drawToasts = hud.wantsNotifications() && notifications.hasActive();
         final boolean drawWatermark = hud.wantsWatermark();
-        if (!drawArray && !drawToasts && !drawWatermark) {
+        final boolean drawTargetHud = hud.wantsTargetHud();
+        if (!drawArray && !drawToasts && !drawWatermark && !drawTargetHud) {
             return;
         }
 
@@ -168,6 +169,12 @@ public final class HudRenderer {
                 }
                 if (drawToasts) {
                     drawNotifications(sw, sh, scale, nowNs);
+                }
+                // ClickGUI draws Target HUD on top so it stays visible/movable there.
+                if (drawTargetHud
+                        && !(Minecraft.getMinecraft().currentScreen
+                        instanceof gnu.client.ui.clickgui.ClickGuiScreen)) {
+                    HudTargetHud.instance().render(sr);
                 }
                 // Depth/lighting restored by GlGuard.finally
             }

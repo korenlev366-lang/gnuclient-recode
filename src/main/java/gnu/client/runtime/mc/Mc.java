@@ -325,11 +325,28 @@ public final class Mc {
         return attackEntity(target, true);
     }
 
+    /**
+     * Attack with protocol-aware swing order. Grim PacketOrderB:
+     * 1.8 = ANIMATION then INTERACT; 1.9+ = INTERACT then ANIMATION.
+     * ViaForgePlus {@code ProtocolFixer.sendFixedAttack} matches that when Via &gt; 1.8.
+     */
     public static boolean attackEntity(Entity target, boolean swing) {
         EntityPlayerSP p = player();
         PlayerControllerMP c = controller();
         if (p == null || c == null || target == null)
             return false;
+        try {
+            if (net.aspw.viaforgeplus.api.ProtocolFixer.newerThan1_8()) {
+                if (swing) {
+                    net.aspw.viaforgeplus.api.ProtocolFixer.sendFixedAttack(p, target);
+                } else {
+                    c.attackEntity(p, target);
+                }
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // Via not on classpath / not ready
+        }
         if (swing)
             p.swingItem();
         c.attackEntity(p, target);

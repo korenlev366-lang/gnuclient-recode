@@ -13,6 +13,7 @@ import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.module.modules.combat.RavenAntiBot;
 import gnu.client.module.modules.combat.ReachModule;
+import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.module.modules.network.LagrangeModule;
 import gnu.client.module.modules.settings.ConfigManagerModule;
 import gnu.client.common.GnuLog;
@@ -121,13 +122,17 @@ public final class ClientEventListener {
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public void onPreAttack(PreAttackEvent event) {
-        if (KillAuraModule.shouldCancelVanillaClick())
+        if (KillAuraModule.shouldCancelVanillaClick()
+                || ScaffoldModule.shouldCancelVanillaClick())
             event.setCanceled(true);
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public void onRightClickMouse(RightClickMouseEvent event) {
-        if (KillAuraModule.shouldCancelVanillaClick())
+        // OpenMyau/wsamiaw: Scaffold owns places — vanilla RMB while KeepY-on-press (sword
+        // spoof) sends USE_ITEM / air place then C09 → Grim PacketOrderE/N + place flags.
+        if (KillAuraModule.shouldCancelVanillaClick()
+                || ScaffoldModule.shouldCancelVanillaClick())
             event.setCanceled(true);
     }
 

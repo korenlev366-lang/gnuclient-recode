@@ -7,5 +7,15 @@
     "mcversion": "${mcversion}",
     "authorList": ["GNU"],
     "url": ""
+  },
+  {
+    "modid": "viaforgeplus",
+    "name": "ViaForgePlus",
+    "description": "Bundled ViaForgePlus — client-side Via* for Forge 1.8.9.",
+    "version": "1.0.6",
+    "mcversion": "1.8.9",
+    "url": "https://github.com/ViaVersionMCP/ViaForgePlus",
+    "authorList": ["As_pw", "FlorianMichael", "EnZaXD"],
+    "dependencies": []
   }
 ]

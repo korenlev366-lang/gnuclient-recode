@@ -2,13 +2,15 @@
 
 Minecraft 1.8.9 Forge client mod — Essential Loom + mixins + Java ClickGUI.
 
+**ViaForgePlus is compiled into this jar** (sources from sibling `../ViaForgePlus`, plus its `libs/*.jar`). Keep that checkout next to `gnuclient recode` when building.
+
 ## build
 
 ```bash
-./gradlew build
+./gradlew build -x test -Dorg.gradle.jvmargs="-Xmx8g"
 ```
 
-Output jar: `build/libs/gnuclient-1.0.0.jar` — copy into your mods folder.
+Output jar: `build/libs/gnuclient-<version>.jar` — one inject (gnuclient + ViaForgePlus).
 
 ## Dev client
 

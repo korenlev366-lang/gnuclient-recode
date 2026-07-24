@@ -8,8 +8,10 @@ import org.lwjgl.input.Keyboard;
 
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 public final class ModuleManager {
 
@@ -145,20 +147,33 @@ public final class ModuleManager {
         try {
             Keyboard.poll();
             long now = System.currentTimeMillis();
+            // Sample each keycode once so shared binds all see the same rising edge.
+            // (Updating prevKeyState inside the module loop made only the first module fire.)
+            Set<Integer> rising = new HashSet<>();
+            Set<Integer> codes = new HashSet<>();
             for (Module module : modules.values()) {
                 int code = module.getKeyCode();
-                if (code <= 0 || code >= Keyboard.KEYBOARD_SIZE)
-                    continue;
+                if (code > 0 && code < Keyboard.KEYBOARD_SIZE)
+                    codes.add(code);
+            }
+            for (int code : codes) {
                 boolean down = Keyboard.isKeyDown(code);
                 boolean prev = prevKeyState.getOrDefault(code, false);
-                if (down && !prev) {
-                    Long last = lastToggleTime.get(module);
-                    if (last == null || now - last > TOGGLE_DEBOUNCE_MS) {
-                        dispatchKeybind(module);
-                        lastToggleTime.put(module, now);
-                    }
-                }
+                if (down && !prev)
+                    rising.add(code);
                 prevKeyState.put(code, down);
+            }
+            if (rising.isEmpty())
+                return;
+            for (Module module : modules.values()) {
+                int code = module.getKeyCode();
+                if (!rising.contains(code))
+                    continue;
+                Long last = lastToggleTime.get(module);
+                if (last == null || now - last > TOGGLE_DEBOUNCE_MS) {
+                    dispatchKeybind(module);
+                    lastToggleTime.put(module, now);
+                }
             }
         } catch (Throwable ignored) {
         }

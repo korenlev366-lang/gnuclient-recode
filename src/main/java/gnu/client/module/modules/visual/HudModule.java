@@ -4,6 +4,7 @@ import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.setting.BoolSetting;
+import gnu.client.module.setting.SliderSetting;
 import gnu.client.ui.hud.HudRenderer;
 import gnu.client.ui.hud.NotificationQueue;
 
@@ -24,11 +25,26 @@ public final class HudModule extends Module {
     private final BoolSetting showNotifications = addSetting(new BoolSetting("Notifications", true));
     private final BoolSetting showWatermark = addSetting(new BoolSetting("Watermark", true));
     private final BoolSetting showSuffixes = addSetting(new BoolSetting("Show suffixes", true));
+    private final BoolSetting showScoreboard = addSetting(new BoolSetting("Scoreboard", true));
+    private final BoolSetting scoreboardUnlock = addSetting(new BoolSetting("Scoreboard unlock", false));
+    /** Absolute scaled position; {@code -1} = default (right / mid). */
+    private final SliderSetting scoreboardX = addSetting(new SliderSetting("Scoreboard X", -1f, -1f, 2000f, 1f));
+    private final SliderSetting scoreboardY = addSetting(new SliderSetting("Scoreboard Y", -1f, -1f, 2000f, 1f));
+    private final BoolSetting showTargetHud = addSetting(new BoolSetting("Target HUD", true));
+    private final BoolSetting targetHudUnlock = addSetting(new BoolSetting("Target HUD unlock", false));
+    private final SliderSetting targetHudX = addSetting(new SliderSetting("Target HUD X", -1f, -1f, 2000f, 1f));
+    private final SliderSetting targetHudY = addSetting(new SliderSetting("Target HUD Y", -1f, -1f, 2000f, 1f));
 
     public HudModule() {
         super("HUD", "Enabled module list and toggle notifications", Category.VISUALS);
         instance = this;
         showSuffixes.visibleWhen(() -> showArray.getValue());
+        scoreboardUnlock.visibleWhen(() -> showScoreboard.getValue());
+        scoreboardX.visibleWhen(() -> showScoreboard.getValue());
+        scoreboardY.visibleWhen(() -> showScoreboard.getValue());
+        targetHudUnlock.visibleWhen(() -> showTargetHud.getValue());
+        targetHudX.visibleWhen(() -> showTargetHud.getValue());
+        targetHudY.visibleWhen(() -> showTargetHud.getValue());
     }
 
     public static HudModule instance() {
@@ -60,6 +76,48 @@ public final class HudModule extends Module {
         return showSuffixes.getValue();
     }
 
+    public boolean wantsScoreboard() {
+        return showScoreboard.getValue();
+    }
+
+    public boolean wantsScoreboardUnlock() {
+        return showScoreboard.getValue() && scoreboardUnlock.getValue();
+    }
+
+    public float scoreboardX() {
+        return scoreboardX.getValue();
+    }
+
+    public float scoreboardY() {
+        return scoreboardY.getValue();
+    }
+
+    public void setScoreboardPos(float x, float y) {
+        scoreboardX.setValue(x);
+        scoreboardY.setValue(y);
+    }
+
+    public boolean wantsTargetHud() {
+        return showTargetHud.getValue();
+    }
+
+    public boolean wantsTargetHudUnlock() {
+        return showTargetHud.getValue() && targetHudUnlock.getValue();
+    }
+
+    public float targetHudX() {
+        return targetHudX.getValue();
+    }
+
+    public float targetHudY() {
+        return targetHudY.getValue();
+    }
+
+    public void setTargetHudPos(float x, float y) {
+        targetHudX.setValue(x);
+        targetHudY.setValue(y);
+    }
+
     public static boolean hasActiveNotifications() {
         HudRenderer renderer = HudRenderer.instance();
         return renderer != null && renderer.hasActiveNotifications();
@@ -74,6 +132,9 @@ public final class HudModule extends Module {
             return true;
         }
         if (hud.wantsWatermark()) {
+            return true;
+        }
+        if (hud.wantsTargetHud()) {
             return true;
         }
         return hud.wantsNotifications() && hasActiveNotifications();

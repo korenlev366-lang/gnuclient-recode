@@ -265,6 +265,23 @@ public final class KillAuraModule extends Module implements PacketListener {
             && ka.autoBlockHelper.isBlockingSession();
     }
 
+    /**
+     * OpenMyau {@code KillAura.isBlocking()} for first-person render: keep the sword in
+     * the BLOCK pose during auto-block (including release ticks / dig swings) by spoofing
+     * {@code itemInUse} for the camera frame only.
+     */
+    public static boolean shouldRenderBlocking() {
+        Module module = ModuleManager.instance().getModule("KillAura");
+        if (!(module instanceof KillAuraModule) || !module.isEnabled())
+            return false;
+        KillAuraModule ka = (KillAuraModule) module;
+        if (ka.autoBlock.getValue() == KillAuraAutoBlock.NONE || !Mc.isHoldingSword())
+            return false;
+        // fakeBlockState modes (FAKE/HYPIXEL/…) plus any active AB session (LEGIT/GRIM/…).
+        return ka.autoBlockHelper.isFakeBlocking()
+            || ka.autoBlockHelper.isBlockingSession();
+    }
+
     /** Auto-block mode index for cross-module coordination (e.g. NoSlow Grim). */
     public int getAutoBlockMode() {
         return autoBlock.getValue();

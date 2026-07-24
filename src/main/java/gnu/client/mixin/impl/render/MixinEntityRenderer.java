@@ -3,6 +3,7 @@ package gnu.client.mixin.impl.render;
 import gnu.client.event.PostMouseSelectionEvent;
 import gnu.client.helper.RotationHelper;
 import gnu.client.module.modules.settings.PerformanceModule;
+import gnu.client.runtime.AutoBlockPoseHook;
 import gnu.client.runtime.FreeLookHook;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.EntityRenderer;
@@ -43,6 +44,17 @@ public class MixinEntityRenderer {
     @Redirect(method = "updateCameraAndRender", at = @At(value = "FIELD", target = "Lnet/minecraft/client/Minecraft;inGameHasFocus:Z"))
     private boolean freelookOverrideMouse(Minecraft mc) {
         return FreeLookHook.overrideMouse(mc);
+    }
+
+    /** OpenMyau fake-block pose for KA AB — logic in {@link AutoBlockPoseHook}. */
+    @Inject(method = "updateCameraAndRender", at = @At("HEAD"))
+    private void gnu$forceAutoBlockPose(float partialTicks, long finishTimeNano, CallbackInfo ci) {
+        AutoBlockPoseHook.beginFrame();
+    }
+
+    @Inject(method = "updateCameraAndRender", at = @At("RETURN"))
+    private void gnu$restoreAutoBlockPose(float partialTicks, long finishTimeNano, CallbackInfo ci) {
+        AutoBlockPoseHook.endFrame();
     }
 
     @Inject(method = "renderWorld", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/EntityRenderer;getMouseOver(F)V", shift = At.Shift.AFTER))

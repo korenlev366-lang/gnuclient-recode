@@ -8,6 +8,7 @@ import gnu.client.event.PostUpdateEvent;
 import gnu.client.event.PreMotionEvent;
 import gnu.client.event.PreUpdateEvent;
 import gnu.client.utility.RotationUtils;
+import net.aspw.viaforgeplus.api.ProtocolFixer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.AbstractClientPlayer;
 import net.minecraft.client.entity.EntityPlayerSP;
@@ -118,7 +119,11 @@ public abstract class MixinEntityPlayerSP extends AbstractClientPlayer {
             double dz = preMotionEvent.getPosZ() - this.lastReportedPosZ;
             double dyaw = preMotionEvent.getYaw() - this.lastReportedYaw;
             double dpitch = preMotionEvent.getPitch() - this.lastReportedPitch;
-            boolean moved = dx * dx + dy * dy + dz * dz > 9.0E-4 || this.positionUpdateTicks >= 20;
+            // Grim BadPacketsE: Via 1.9+ treats us as a modern client (max 19 idle
+            // flying ticks). Vanilla 1.8 only sends a position reminder at 20.
+            int posReminder = ProtocolFixer.positionReminderTicks();
+            boolean moved = dx * dx + dy * dy + dz * dz > 9.0E-4
+                    || this.positionUpdateTicks >= posReminder;
             boolean rotated = dyaw != 0.0 || dpitch != 0.0;
 
             if (this.ridingEntity == null) {

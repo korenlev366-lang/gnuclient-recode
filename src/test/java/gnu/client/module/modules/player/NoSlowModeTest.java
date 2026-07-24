@@ -6,17 +6,20 @@ import static org.junit.Assert.*;
 
 public class NoSlowModeTest {
     @Test
-    public void grimSlotSpoofAlternatesCurrentAndSwapSlot() {
-        assertEquals(1, NoSlowModule.nextGrimSlot(0, 1, true, -1));
-        assertEquals(0, NoSlowModule.nextGrimSlot(0, 1, false, 1));
-        assertEquals(2, NoSlowModule.nextGrimSlot(1, 1, false, 1));
+    public void grimOffSlotStaysOffUseSlot() {
+        // While using we stay on off-slot (not flip back) for MultiActions exempt.
+        assertEquals(1, NoSlowModule.nextGrimTarget(0, 1, true, -1));
+        assertEquals(1, NoSlowModule.nextGrimTarget(0, 1, true, 0));
+        assertEquals(2, NoSlowModule.nextGrimTarget(1, 1, true, 1));
     }
 
     @Test
-    public void modeIndicesMatchOpenMyau() {
+    public void modeIndicesMatchWsamiaw() {
         assertEquals(0, NoSlowModule.MODE_NONE);
         assertEquals(1, NoSlowModule.MODE_VANILLA);
         assertEquals(2, NoSlowModule.MODE_GRIM);
+        assertEquals(2, NoSlowModule.MODE_FLOAT);
+        assertEquals(3, NoSlowModule.MODE_FOOD_GRIM);
     }
 
     @Test

@@ -4,6 +4,7 @@ import gnu.client.module.Category;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.modules.combat.velocity.AACVelocity;
+import gnu.client.module.modules.combat.velocity.AttackReduceVelocity;
 import gnu.client.module.modules.combat.velocity.BounceVelocity;
 import gnu.client.module.modules.combat.velocity.BufferAbuseVelocity;
 import gnu.client.module.modules.combat.velocity.DelayVelocity;
@@ -21,6 +22,7 @@ import gnu.client.module.modules.combat.velocity.LegitVelocity;
 import gnu.client.module.modules.combat.velocity.MMCVelocity;
 import gnu.client.module.modules.combat.velocity.MatrixVelocity;
 import gnu.client.module.modules.combat.velocity.OMDelayVelocity;
+import gnu.client.module.modules.combat.velocity.PolarVelocity;
 import gnu.client.module.modules.combat.velocity.RedeskyVelocity;
 import gnu.client.module.modules.combat.velocity.ReverseVelocity;
 import gnu.client.module.modules.combat.velocity.StandardVelocity;
@@ -51,7 +53,7 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * OpenMiau-style Velocity — 26 modes via {@link VelocityMode} strategies.
+ * OpenMiau-style Velocity — modes via {@link VelocityMode} strategies.
  *
  * <p>Tick dispatch: {@link #onTickStart()} → {@code onUpdate(true)} (PRE / early tick);
  * {@link #onTick()} → {@code onUpdate(false)} (POST / late tick).</p>
@@ -64,7 +66,7 @@ public final class VelocityModule extends Module implements PacketListener {
             "OMDelay", "Reverse", "LegitTest", "LegitSmart", "IntaveReduce", "Grimtest", "JumpReset",
             "Standard", "AAC", "Bounce", "BufferAbuse", "Delay", "Grim", "GrimReduce", "Ground", "Intave",
             "Karhu", "Legit", "MMC", "Matrix", "Redesky", "Tick", "UniversoCraft", "Vulcan",
-            "WatchdogPrediction", "Watchdog"));
+            "WatchdogPrediction", "Watchdog", "AttackReduce", "Polar"));
 
     // ── Settings (public final — modes read directly) ─────────────────────
 
@@ -124,6 +126,10 @@ public final class VelocityModule extends Module implements PacketListener {
     public final BoolSetting onSwing =
             addSetting(new BoolSetting("On Swing", false));
 
+    /** wsamiaw AttackReduce — only apply 5% horizontal KB while moving. */
+    public final BoolSetting onlyWhileMoving =
+            addSetting(new BoolSetting("Only While Moving", true));
+
     // ── Shared state (OpenMiau Velocity.java parity) ──────────────────────
 
     public int chanceCounter;
@@ -153,7 +159,7 @@ public final class VelocityModule extends Module implements PacketListener {
         legitSmartJumpLimit.visibleWhen(() -> modeIs("LegitSmart"));
         intaveReduceFactor.visibleWhen(() -> modeIs("IntaveReduce"));
         intaveReduceHurtTime.visibleWhen(() -> modeIs("IntaveReduce"));
-        chance.visibleWhen(() -> modeIsAny("Legit", "LegitTest", "LegitSmart", "JumpReset", "Grim"));
+        chance.visibleWhen(() -> modeIsAny("Legit", "LegitTest", "LegitSmart", "JumpReset", "Grim", "AttackReduce"));
         horizontal.visibleWhen(() -> modeIsAny("Standard", "BufferAbuse", "Redesky", "Vulcan"));
         vertical.visibleWhen(() -> modeIsAny("Standard", "BufferAbuse", "Redesky", "Vulcan"));
         explosionHorizontal.visibleWhen(() -> modeIs("Standard"));
@@ -167,6 +173,7 @@ public final class VelocityModule extends Module implements PacketListener {
         grimAdaptTicks.visibleWhen(() -> modeIs("Grim"));
         grimTransactions.visibleWhen(() -> modeIs("Grim"));
         grimTxDelay.visibleWhen(() -> modeIs("Grim"));
+        onlyWhileMoving.visibleWhen(() -> modeIs("AttackReduce"));
 
         modes.add(new OMDelayVelocity(this));
         modes.add(new ReverseVelocity(this));
@@ -194,6 +201,8 @@ public final class VelocityModule extends Module implements PacketListener {
         modes.add(new VulcanVelocity(this));
         modes.add(new WatchdogPredictionVelocity(this));
         modes.add(new WatchdogVelocity(this));
+        modes.add(new AttackReduceVelocity(this));
+        modes.add(new PolarVelocity(this));
     }
 
     public VelocityMode getActiveMode() {
