@@ -282,6 +282,25 @@ public final class KillAuraModule extends Module implements PacketListener {
     }
 
     /**
+     * External modules must not inject {@code C02 ATTACK} while KillAura owns the
+     * autoblock / MultiInteract window (PacketOrderI, MultiActions, MultiInteractA).
+     */
+    public static boolean blocksExternalAttackPackets() {
+        Module module = ModuleManager.instance().getModule("KillAura");
+        if (!(module instanceof KillAuraModule) || !module.isEnabled())
+            return false;
+        KillAuraModule ka = (KillAuraModule) module;
+        if (ka.autoBlockHelper.isBlockingSession())
+            return true;
+        // Real autoblock with a live target — KA sequences release/attack/reblock.
+        if (ka.autoBlock.getValue() != KillAuraAutoBlock.NONE && ka.attackTarget != null)
+            return true;
+        if (AuraCombatPacketGuard.shouldSkipAttackForReleaseOrder())
+            return true;
+        return false;
+    }
+
+    /**
      * OpenMyau {@code KillAura.isBlocking()} for first-person render: keep the sword in
      * the BLOCK pose during auto-block (including release ticks / dig swings) by spoofing
      * {@code itemInUse} for the camera frame only.

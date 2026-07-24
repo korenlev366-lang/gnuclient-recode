@@ -1,7 +1,10 @@
 package gnu.client.module.modules.combat.velocity;
 
+import gnu.client.module.Module;
+import gnu.client.module.ModuleManager;
 import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.combat.VelocityModule;
+import gnu.client.runtime.AuraCombatPacketGuard;
 import gnu.client.runtime.mc.Mc;
 import gnu.client.utility.PacketUtils;
 import net.minecraft.client.entity.EntityPlayerSP;
@@ -16,13 +19,10 @@ import net.minecraft.util.MovementInput;
 /**
  * Jump-reset + Polar hit-slow abuse with capped extra attack packets.
  *
- * <p>While hurt and crosshair is on an {@link EntityPlayer}, sends legitimate
- * {@code C0A}/{@code C02 ATTACK} packets and applies Polar {@code 0.59928}
- * sprint-attack slow (instead of vanilla {@code 0.6}). Requires attack key
- * held on a crosshair player, or KillAura with a valid player target whose
- * silent/camera look-ray hits the hitbox (same client can-hit gate as KA).
- * Without a knockback enchant on the held item, at most one reduce C02 per
- * tick (Simulation / AntiKB).</p>
+ * <p>Simple jump-reset (same as {@link JumpResetVelocity}). Extra {@code C02}s are
+ * skipped while WTap/MoreKB, KillAura autoblock, item-use/block, or a same-tick
+ * {@code C07} release would make the attack PacketOrder / MultiActions unsafe.
+ * Without KB stick, hard-capped at 1 C02/tick.</p>
  */
 public final class ReduceJumpVelocity extends VelocityMode {
 
@@ -75,12 +75,15 @@ public final class ReduceJumpVelocity extends VelocityMode {
             return;
         }
 
-        // Fresh hurt window — refill attack budget once per hit.
         if (hurt >= 9 && lastHurtTime < 9)
             attacksLeft = Math.max(0, (int) parent.reduceJumpAttacks.getValue().floatValue());
         lastHurtTime = hurt;
 
         if (attacksLeft <= 0)
+            return;
+        if (sprintResetModuleActive())
+            return;
+        if (unsafeForExtraAttack(player))
             return;
         if (parent.isInLiquidOrWeb())
             return;
@@ -98,9 +101,10 @@ public final class ReduceJumpVelocity extends VelocityMode {
         for (int i = 0; i < perTick && attacksLeft > 0; i++) {
             if (resolveAttackTarget() != target)
                 break;
-            // Re-arm client sprint so each reduce applies Polar hit-slow.
             if (!player.isSprinting())
-                Mc.setClientSprinting(player, true);
+                break;
+            if (unsafeForExtraAttack(player))
+                break;
             if (swing)
                 PacketUtils.sendPacketNoEvent(new C0APacketAnimation());
             PacketUtils.sendPacketNoEvent(new C02PacketUseEntity(target, C02PacketUseEntity.Action.ATTACK));
@@ -112,9 +116,28 @@ public final class ReduceJumpVelocity extends VelocityMode {
     }
 
     /**
-     * Manual: attack key + crosshair player.
-     * KillAura: has a player target and look-ray actually hits their box (can hit).
+     * Autoblock / use-item / PacketOrderI release window — do not inject C02.
+     * Jump-reset still runs; only the extra attack packets are gated.
      */
+    private static boolean unsafeForExtraAttack(EntityPlayerSP player) {
+        if (KillAuraModule.blocksExternalAttackPackets())
+            return true;
+        if (AuraCombatPacketGuard.shouldSkipAttackForReleaseOrder())
+            return true;
+        if (Mc.isUsingItem(player) || Mc.isBlocking(player))
+            return true;
+        return false;
+    }
+
+    private static boolean sprintResetModuleActive() {
+        return isModuleEnabled("W Tap") || isModuleEnabled("MoreKB");
+    }
+
+    private static boolean isModuleEnabled(String name) {
+        Module module = ModuleManager.instance().getModule(name);
+        return module != null && module.isEnabled();
+    }
+
     private static EntityPlayer resolveAttackTarget() {
         EntityPlayer cross = crosshairPlayer();
         Entity ka = KillAuraModule.getCurrentTarget();
@@ -124,7 +147,6 @@ public final class ReduceJumpVelocity extends VelocityMode {
         if (Mc.isAttackKeyDown()) {
             if (cross == null)
                 return null;
-            // Don't reduce into a different player than KA is locked on.
             if (kaPlayer != null && cross != kaPlayer)
                 return null;
             return cross;
@@ -132,17 +154,11 @@ public final class ReduceJumpVelocity extends VelocityMode {
 
         if (kaPlayer == null)
             return null;
-        // Silent/camera look must raycast the hitbox (same gate as KA can-hit).
-        // Visual objectMouseOver is ignored — silent rotations often leave it elsewhere.
         if (!KillAuraModule.lookRayHitsCurrentTarget())
             return null;
         return kaPlayer;
     }
 
-    /**
-     * Multi-C02 same tick needs KB enchant (knockback stick) or Polar Simulation / AntiKB
-     * flags the extra attack slows. Plain weapons stay at 1/tick.
-     */
     private int effectiveAttacksPerTick(EntityPlayerSP player) {
         int wanted = Math.max(1, (int) parent.reduceJumpPerTick.getValue().floatValue());
         if (EnchantmentHelper.getKnockbackModifier(player) > 0)
