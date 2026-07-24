@@ -22,9 +22,11 @@ public final class TimerModule extends Module {
         super("Timer", "Change game tick speed", Category.MOVEMENT);
     }
 
-    /** Safety net — restore vanilla speed when neither Timer nor TimerRange owns it. */
+    /** Safety net — restore vanilla speed when neither Timer, TimerRange, nor Speed owns it. */
     public static void maintain() {
         if (gnu.client.module.modules.combat.TimerRangeModule.isControllingTimer())
+            return;
+        if (SpeedModule.isControllingTimer())
             return;
         Module module = ModuleManager.INSTANCE.getModule("Timer");
         if (!(module instanceof TimerModule) || !module.isEnabled())

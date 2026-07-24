@@ -20,6 +20,7 @@ import gnu.client.module.modules.combat.WTapModule;
 import gnu.client.module.modules.misc.AnticheatModule;
 import gnu.client.module.modules.movement.FastStopModule;
 import gnu.client.module.modules.movement.KeepSprintModule;
+import gnu.client.module.modules.movement.SpeedModule;
 import gnu.client.module.modules.movement.SprintModule;
 import gnu.client.module.modules.movement.StasisModule;
 import gnu.client.module.modules.movement.TimerModule;
@@ -68,7 +69,7 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
 public class GnuClientMod {
 
     public static final String MOD_ID = "gnuclient";
-    public static final String VERSION = "2.4.0";
+    public static final String VERSION = "2.5.0";
 
     public static GnuClientMod instance;
     public static ModuleManager moduleManager;
@@ -121,6 +122,7 @@ public class GnuClientMod {
         safeRegister(new AutoPlaceModule());
         safeRegister(new BridgeAssistModule());
         safeRegister(new FastStopModule());
+        safeRegister(new SpeedModule());
         safeRegister(new TimerModule());
         safeRegister(new VelocityModule());
         safeRegister(new TimerRangeModule());

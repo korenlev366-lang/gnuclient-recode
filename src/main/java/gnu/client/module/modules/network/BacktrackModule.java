@@ -51,6 +51,8 @@ public final class BacktrackModule extends Module implements PacketListener {
     private final BoolSetting smartFlush = addSetting(new BoolSetting("Smart Flush", true));
 
     private final List<QueuedPacket> packets = new ArrayList<>();
+    /** Guards {@link #packets} + target/queue flags — onReceive is Netty, onTick is client. */
+    private final Object lock = new Object();
     /** The entity you last attacked — BackTrack only ever tracks this (players only),
      *  mirroring the original gnuclient BackTrack's attack-packet-driven target. */
     private EntityLivingBase entity;
@@ -95,7 +97,11 @@ public final class BacktrackModule extends Module implements PacketListener {
 
     /** True while inbound packets are delayed (used by PingFix to keep ping in sync). */
     public boolean isLagging() {
-        return isEnabled() && !packets.isEmpty();
+        if (!isEnabled())
+            return false;
+        synchronized (lock) {
+            return !packets.isEmpty();
+        }
     }
 
     public BacktrackModule() {
@@ -129,12 +135,14 @@ public final class BacktrackModule extends Module implements PacketListener {
     @Override
     public void onDisable() {
         PacketEvents.unregister(this);
-        resetPackets();
-        packets.clear();
-        entity = null;
-        targetEntityId = -1;
-        blockPackets = false;
-        lastOwnAttackMs = 0L;
+        synchronized (lock) {
+            resetPacketsLocked();
+            packets.clear();
+            entity = null;
+            targetEntityId = -1;
+            blockPackets = false;
+            lastOwnAttackMs = 0L;
+        }
         InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
     }
 
@@ -143,72 +151,72 @@ public final class BacktrackModule extends Module implements PacketListener {
         EntityPlayerSP player = Mc.player();
         WorldClient world = Mc.world();
         if (player == null || world == null) {
-            resetPackets();
-            entity = null;
-            blockPackets = false;
-            return;
-        }
-
-
-        // Target = the entity you last attacked (set from the outgoing C02 ATTACK packet in
-        // onSend), resolved against the current world. BackTrack tracks players only and
-        // never pulls KillAura's target — this matches the original gnuclient behavior and
-        // avoids holding packets for anything you aren't actually hitting.
-        if (entity == null || entity.isDead || entity.getEntityId() != targetEntityId
-                || Mc.world().getEntityByID(targetEntityId) != entity) {
-            entity = targetEntityId >= 0
-                    ? (EntityLivingBase) Mc.world().getEntityByID(targetEntityId)
-                    : null;
-            if (entity != null && !(entity instanceof EntityPlayer))
+            synchronized (lock) {
+                resetPacketsLocked();
                 entity = null;
-        }
-
-        if (entity == null) {
-            blockPackets = false;
-            resetPackets();
-            lastOwnAttackMs = 0L;
+                blockPackets = false;
+            }
             return;
         }
 
-        long now = System.currentTimeMillis();
+        synchronized (lock) {
+            // Target = the entity you last attacked (set from the outgoing C02 ATTACK packet in
+            // onSend), resolved against the current world. BackTrack tracks players only and
+            // never pulls KillAura's target — this matches the original gnuclient behavior and
+            // avoids holding packets for anything you aren't actually hitting.
+            Entity byId = targetEntityId >= 0 ? world.getEntityByID(targetEntityId) : null;
+            if (entity == null || entity.isDead || entity.getEntityId() != targetEntityId
+                    || byId != entity) {
+                entity = byId instanceof EntityPlayer ? (EntityLivingBase) byId : null;
+            }
 
-        // HurtTime = how long after the initiating hit we keep delaying target packets.
-        // MinDelay/MaxDelay = how long each queued packet waits before release (the actual
-        // backtrack depth). Taking knockback pauses new queueing.
-        boolean inRange = player.getDistanceToEntity(entity) < hitRange.getValue();
-        boolean withinAttackWindow = now - lastOwnAttackMs <= (long) (float) hurtTime.getValue();
-        boolean takingKnockback = player.hurtTime >= 3 && player.hurtTime <= 9;
+            if (entity == null) {
+                blockPackets = false;
+                resetPacketsLocked();
+                lastOwnAttackMs = 0L;
+                return;
+            }
 
-        boolean shouldAccept = inRange && withinAttackWindow && !takingKnockback;
+            long now = System.currentTimeMillis();
 
-        float delayHi = Math.max(minTime.getValue(), maxTime.getValue());
-        if (delayHi <= 0.0f) {
-            currentDelay = 0L;
-        } else if (shouldAccept && !blockPackets) {
-            currentDelay = rollDelayMs();
-        } else if (currentDelay > (long) delayHi) {
-            currentDelay = (long) delayHi;
-        }
+            // HurtTime = how long after the initiating hit we keep delaying target packets.
+            // MinDelay/MaxDelay = how long each queued packet waits before release (the actual
+            // backtrack depth). Taking knockback pauses new queueing.
+            boolean inRange = player.getDistanceToEntity(entity) < hitRange.getValue();
+            boolean withinAttackWindow = now - lastOwnAttackMs <= (long) (float) hurtTime.getValue();
+            boolean takingKnockback = player.hurtTime >= 3 && player.hurtTime <= 9;
 
-        if (shouldAccept) {
-            if (!blockPackets)
-                InboundLagCoordinator.tryAcquire(InboundLagCoordinator.Owner.BACKTRACK);
-            blockPackets = true;
-        } else {
-            blockPackets = false;
-        }
+            boolean shouldAccept = inRange && withinAttackWindow && !takingKnockback;
 
-        // 0ms delay: never keep a queue — flush leftovers and stay passthrough.
-        if (currentDelay <= 0L) {
-            resetPackets();
-            if (!blockPackets)
+            float delayHi = Math.max(minTime.getValue(), maxTime.getValue());
+            if (delayHi <= 0.0f) {
+                currentDelay = 0L;
+            } else if (shouldAccept && !blockPackets) {
+                currentDelay = rollDelayMs();
+            } else if (currentDelay > (long) delayHi) {
+                currentDelay = (long) delayHi;
+            }
+
+            if (shouldAccept) {
+                if (!blockPackets)
+                    InboundLagCoordinator.tryAcquire(InboundLagCoordinator.Owner.BACKTRACK);
+                blockPackets = true;
+            } else {
+                blockPackets = false;
+            }
+
+            // 0ms delay: never keep a queue — flush leftovers and stay passthrough.
+            if (currentDelay <= 0L) {
+                resetPacketsLocked();
+                if (!blockPackets)
+                    InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
+                return;
+            }
+
+            releaseExpiredPacketsLocked();
+            if (!blockPackets && packets.isEmpty())
                 InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
-            return;
         }
-
-        releaseExpiredPackets();
-        if (!blockPackets && packets.isEmpty())
-            InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
     }
 
     @Override
@@ -222,10 +230,12 @@ public final class BacktrackModule extends Module implements PacketListener {
         // accepting, so KillAura/repeated clicks can't extend the window forever.
         Entity attacked = use.getEntityFromWorld(Mc.world());
         if (attacked instanceof EntityPlayer) {
-            entity = (EntityLivingBase) attacked;
-            targetEntityId = attacked.getEntityId();
-            if (!blockPackets)
-                lastOwnAttackMs = System.currentTimeMillis();
+            synchronized (lock) {
+                entity = (EntityLivingBase) attacked;
+                targetEntityId = attacked.getEntityId();
+                if (!blockPackets)
+                    lastOwnAttackMs = System.currentTimeMillis();
+            }
         }
         return false;
     }
@@ -237,91 +247,100 @@ public final class BacktrackModule extends Module implements PacketListener {
         if (Mc.currentScreen() != null)
             return false;
 
-        // Sync via the shared coordinator: only the highest-priority owner may hold the
-        // inbound stream. Yield to KnockbackDelay (highest) and Lagrange (middle) so the
-        // three lag modules never queue packets simultaneously.
-        if (InboundLagCoordinator.isBlockedFor(InboundLagCoordinator.Owner.BACKTRACK)) {
-            if (!packets.isEmpty())
-                resetPackets();
-            blockPackets = false;
-            InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
-            return false;
-        }
-
-        if (packet instanceof S08PacketPlayerPosLook) {
-            resetPackets();
-            return false;
-        }
-
-        if (packet instanceof S14PacketEntity) {
-            S14PacketEntity p = (S14PacketEntity) packet;
-            WorldClient world = Mc.world();
-            Entity e = world != null ? p.getEntity(world) : null;
-            if (e instanceof EntityLivingBase) {
-                EntityLivingBase elb = (EntityLivingBase) e;
-                RealPosAccess rp = realPos(elb);
-                rp.setRealPosX(rp.getRealPosX() + p.func_149062_c());
-                rp.setRealPosY(rp.getRealPosY() + p.func_149061_d());
-                rp.setRealPosZ(rp.getRealPosZ() + p.func_149064_e());
-                if (elb == entity)
-                    trackEspServer(
-                            rp.getRealPosX() / 32.0,
-                            rp.getRealPosY() / 32.0,
-                            rp.getRealPosZ() / 32.0);
+        synchronized (lock) {
+            // Sync via the shared coordinator: only the highest-priority owner may hold the
+            // inbound stream. Yield to KnockbackDelay (highest) and Lagrange (middle) so the
+            // three lag modules never queue packets simultaneously.
+            if (InboundLagCoordinator.isBlockedFor(InboundLagCoordinator.Owner.BACKTRACK)) {
+                if (!packets.isEmpty())
+                    resetPacketsLocked();
+                blockPackets = false;
+                InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
+                return false;
             }
-        }
 
-        if (packet instanceof S18PacketEntityTeleport) {
-            S18PacketEntityTeleport p = (S18PacketEntityTeleport) packet;
-            Entity e = Mc.world() != null ? Mc.world().getEntityByID(p.getEntityId()) : null;
-            if (e instanceof EntityLivingBase) {
-                EntityLivingBase elb = (EntityLivingBase) e;
-                RealPosAccess rp = realPos(elb);
-                rp.setRealPosX(p.getX());
-                rp.setRealPosY(p.getY());
-                rp.setRealPosZ(p.getZ());
-                if (elb == entity)
-                    trackEspServer(
-                            rp.getRealPosX() / 32.0,
-                            rp.getRealPosY() / 32.0,
-                            rp.getRealPosZ() / 32.0);
+            if (packet instanceof S08PacketPlayerPosLook) {
+                resetPacketsLocked();
+                return false;
             }
-        }
 
-        if (entity == null) {
-            resetPackets();
+            if (packet instanceof S14PacketEntity) {
+                S14PacketEntity p = (S14PacketEntity) packet;
+                WorldClient world = Mc.world();
+                Entity e = world != null ? p.getEntity(world) : null;
+                if (e instanceof EntityLivingBase) {
+                    EntityLivingBase elb = (EntityLivingBase) e;
+                    RealPosAccess rp = realPos(elb);
+                    rp.setRealPosX(rp.getRealPosX() + p.func_149062_c());
+                    rp.setRealPosY(rp.getRealPosY() + p.func_149061_d());
+                    rp.setRealPosZ(rp.getRealPosZ() + p.func_149064_e());
+                    if (elb == entity)
+                        trackEspServer(
+                                rp.getRealPosX() / 32.0,
+                                rp.getRealPosY() / 32.0,
+                                rp.getRealPosZ() / 32.0);
+                }
+            }
+
+            if (packet instanceof S18PacketEntityTeleport) {
+                S18PacketEntityTeleport p = (S18PacketEntityTeleport) packet;
+                WorldClient world = Mc.world();
+                Entity e = world != null ? world.getEntityByID(p.getEntityId()) : null;
+                if (e instanceof EntityLivingBase) {
+                    EntityLivingBase elb = (EntityLivingBase) e;
+                    RealPosAccess rp = realPos(elb);
+                    rp.setRealPosX(p.getX());
+                    rp.setRealPosY(p.getY());
+                    rp.setRealPosZ(p.getZ());
+                    if (elb == entity)
+                        trackEspServer(
+                                rp.getRealPosX() / 32.0,
+                                rp.getRealPosY() / 32.0,
+                                rp.getRealPosZ() / 32.0);
+                }
+            }
+
+            if (entity == null) {
+                resetPacketsLocked();
+                return false;
+            }
+
+            // Drain aged packets every receive so delay tracks wall-clock, not just ticks.
+            if (currentDelay > 0L)
+                releaseExpiredPacketsLocked();
+
+            // Old gnu Advanced smart flush: if true server hitbox is closer than the lagged
+            // rendered entity, dump the queue and let this packet through live.
+            if (blockPackets && currentDelay > 0L && smartFlush.getValue()
+                    && shouldQueue(packet) && shouldSmartFlush(Mc.player())) {
+                resetPacketsLocked();
+                return false;
+            }
+
+            if (blockPackets && currentDelay > 0L && shouldQueue(packet)) {
+                packets.add(new QueuedPacket((Packet<?>) packet, System.currentTimeMillis()));
+                return true;
+            }
             return false;
         }
-
-        // Drain aged packets every receive so delay tracks wall-clock, not just ticks.
-        if (currentDelay > 0L)
-            releaseExpiredPackets();
-
-        // Old gnu Advanced smart flush: if true server hitbox is closer than the lagged
-        // rendered entity, dump the queue and let this packet through live.
-        if (blockPackets && currentDelay > 0L && smartFlush.getValue()
-                && shouldQueue(packet) && shouldSmartFlush(Mc.player())) {
-            resetPackets();
-            return false;
-        }
-
-        if (blockPackets && currentDelay > 0L && shouldQueue(packet)) {
-            packets.add(new QueuedPacket((Packet<?>) packet, System.currentTimeMillis()));
-            return true;
-        }
-        return false;
     }
 
     @Override
     public void onRender(float partialTicks) {
-        if (!esp.getValue() || entity == null || packets.isEmpty() || !espServerValid || !Mc.isInGame())
+        if (!esp.getValue() || !Mc.isInGame())
             return;
-
-        double[] server = espServerPos(partialTicks);
-        double rx = server[0];
-        double ry = server[1];
-        double rz = server[2];
-        float f = entity.width / 2.0f;
+        double rx, ry, rz, height;
+        float halfW;
+        synchronized (lock) {
+            if (entity == null || packets.isEmpty() || !espServerValid)
+                return;
+            double[] server = espServerPos(partialTicks);
+            rx = server[0];
+            ry = server[1];
+            rz = server[2];
+            halfW = entity.width / 2.0f;
+            height = entity.height;
+        }
 
         double[] vp = Mc.getViewerPos(partialTicks);
         float r = 0.0f;
@@ -331,8 +350,8 @@ public final class BacktrackModule extends Module implements PacketListener {
 
         RenderHelper.begin();
         EspDraw.fillWithGlow(
-                rx - f - vp[0], ry - vp[1], rz - f - vp[2],
-                rx + f - vp[0], ry + entity.height - vp[1], rz + f - vp[2],
+                rx - halfW - vp[0], ry - vp[1], rz - halfW - vp[2],
+                rx + halfW - vp[0], ry + height - vp[1], rz + halfW - vp[2],
                 r, g, bl, alpha);
         RenderHelper.end();
     }
@@ -441,6 +460,13 @@ public final class BacktrackModule extends Module implements PacketListener {
 
     /** Flush every queued packet immediately (disable / setback / target lost / 0ms). */
     private void resetPackets() {
+        synchronized (lock) {
+            resetPacketsLocked();
+        }
+    }
+
+    /** Caller must hold {@link #lock}. */
+    private void resetPacketsLocked() {
         if (packets.isEmpty())
             return;
         Object netHandler = Mc.netHandler();
@@ -457,8 +483,8 @@ public final class BacktrackModule extends Module implements PacketListener {
         }
     }
 
-    /** Release packets older than {@link #currentDelay} (FIFO). */
-    private void releaseExpiredPackets() {
+    /** Release packets older than {@link #currentDelay} (FIFO). Caller must hold {@link #lock}. */
+    private void releaseExpiredPacketsLocked() {
         if (packets.isEmpty())
             return;
         long now = System.currentTimeMillis();
@@ -466,6 +492,10 @@ public final class BacktrackModule extends Module implements PacketListener {
         Object netHandler = Mc.netHandler();
         while (!packets.isEmpty()) {
             QueuedPacket queued = packets.get(0);
+            if (queued == null) {
+                packets.remove(0);
+                continue;
+            }
             if (now - queued.queuedAtMs < delayMs)
                 break;
             packets.remove(0);

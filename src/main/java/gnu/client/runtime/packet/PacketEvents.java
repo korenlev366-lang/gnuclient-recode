@@ -3,6 +3,7 @@ package gnu.client.runtime.packet;
 import gnu.client.common.GnuLog;
 
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -12,6 +13,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class PacketEvents {
 
     private static final List<PacketListener> LISTENERS = new CopyOnWriteArrayList<>();
+    private static final ConcurrentHashMap<String, Long> LAST_ERROR_LOG_MS = new ConcurrentHashMap<>();
+    private static final long ERROR_LOG_COOLDOWN_MS = 5000L;
 
     private PacketEvents() {}
 
@@ -42,7 +45,7 @@ public final class PacketEvents {
                 if (listener.onSend(packet))
                     return true;
             } catch (Throwable t) {
-                GnuLog.log("JAVA_ PacketEvents.onSend listener error: " + t);
+                logListenerError("onSend", listener, t);
             }
         }
         return false;
@@ -63,9 +66,23 @@ public final class PacketEvents {
                 if (listener.onReceive(packet))
                     return true;
             } catch (Throwable t) {
-                GnuLog.log("JAVA_ PacketEvents.onReceive listener error: " + t);
+                logListenerError("onReceive", listener, t);
             }
         }
         return false;
+    }
+
+    private static void logListenerError(String side, PacketListener listener, Throwable t) {
+        String name = listener != null ? listener.getClass().getName() : "null";
+        String key = side + "|" + name + "|" + t.getClass().getName();
+        long now = System.currentTimeMillis();
+        Long prev = LAST_ERROR_LOG_MS.put(key, now);
+        if (prev != null && now - prev < ERROR_LOG_COOLDOWN_MS)
+            return;
+        String where = "";
+        StackTraceElement[] st = t.getStackTrace();
+        if (st != null && st.length > 0)
+            where = " at " + st[0];
+        GnuLog.log("JAVA_ PacketEvents." + side + " listener error: " + name + " " + t + where);
     }
 }

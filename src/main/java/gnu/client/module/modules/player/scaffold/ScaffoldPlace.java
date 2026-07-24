@@ -366,7 +366,130 @@ public final class ScaffoldPlace {
      */
     public static FaceHit findFaceHit(EntityPlayer player, BlockPos support, EnumFacing face,
             float baseYaw, float basePitch, float moveYaw, boolean hardAway) {
-        if (player == null || support == null || face == null || player.worldObj == null)
+        if (player == null)
+            return null;
+        return findFaceHitAt(player.worldObj, support, face,
+            player.posX, player.posY + player.getEyeHeight(), player.posZ,
+            baseYaw, basePitch, moveYaw, hardAway);
+    }
+
+    /** Like {@link #findFaceHit} but from lastReported eyes (PRE C08 still has this pos). */
+    public static FaceHit findFaceHitLastReported(EntityPlayer player, BlockPos support,
+            EnumFacing face, float baseYaw, float basePitch, float moveYaw, boolean hardAway) {
+        if (player == null || player.worldObj == null)
+            return null;
+        double[] lr = lastReportedEyes(player);
+        return findFaceHitAt(player.worldObj, support, face,
+            lr[0], lr[1], lr[2], baseYaw, basePitch, moveYaw, hardAway);
+    }
+
+    /**
+     * Tower / Grim RotationPlace: look must hit support+face from <b>both</b> lastReported
+     * eyes (C08 pre-flying) and current eyes (C03 / post-flying). hitVec is from current.
+     */
+    public static FaceHit findFaceHitPreAndPost(EntityPlayer player, BlockPos support,
+            EnumFacing face, float baseYaw, float basePitch, float moveYaw, boolean hardAway) {
+        if (player == null || player.worldObj == null || support == null || face == null)
+            return null;
+        double[] lr = lastReportedEyes(player);
+        double curX = player.posX;
+        double curY = player.posY + player.getEyeHeight();
+        double curZ = player.posZ;
+        double[] xs = PLACE_OFFSETS;
+        double[] ys = PLACE_OFFSETS;
+        double[] zs = PLACE_OFFSETS;
+        switch (face) {
+            case NORTH:
+                zs = new double[] { 0.0 };
+                break;
+            case SOUTH:
+                zs = new double[] { 1.0 };
+                break;
+            case WEST:
+                xs = new double[] { 0.0 };
+                break;
+            case EAST:
+                xs = new double[] { 1.0 };
+                break;
+            case DOWN:
+                ys = new double[] { 0.0 };
+                break;
+            case UP:
+                ys = new double[] { 1.0 };
+                break;
+            default:
+                break;
+        }
+        float reach = 4.5f;
+        if (Mc.controller() != null)
+            reach = Mc.controller().getBlockReachDistance();
+        FaceHit best = null;
+        float bestDiff = Float.MAX_VALUE;
+        // Aim samples from current eyes (OpenMyau); require lastReported ray agrees.
+        for (double dx : xs) {
+            for (double dy : ys) {
+                for (double dz : zs) {
+                    double px = support.getX() + dx;
+                    double py = support.getY() + dy;
+                    double pz = support.getZ() + dz;
+                    float[] rot = rotationsToAt(
+                        new Vec3(px, py, pz), curX, curY, curZ, baseYaw, basePitch);
+                    if (hardAway && !Float.isNaN(moveYaw)
+                            && Math.abs(ScaffoldRotations.wrap(rot[0] - moveYaw)) < 90f)
+                        continue;
+                    MovingObjectPosition cur = rayTraceAt(
+                        player.worldObj, curX, curY, curZ, rot[0], rot[1], reach);
+                    if (!isFaceHit(cur, support, face))
+                        continue;
+                    if (findPlacementHitAt(player.worldObj, support, face,
+                            lr[0], lr[1], lr[2], rot[0], rot[1]) == null)
+                        continue;
+                    float diff = Math.abs(ScaffoldRotations.wrap(rot[0] - baseYaw))
+                            + Math.abs(rot[1] - basePitch);
+                    if (best == null || diff < bestDiff) {
+                        best = new FaceHit(rot[0], rot[1], cur.hitVec);
+                        bestDiff = diff;
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    public static boolean hitsFacePreAndPost(EntityPlayer player, BlockPos support,
+            EnumFacing face, float yaw, float pitch) {
+        if (player == null || support == null || face == null)
+            return false;
+        if (findPlacementHit(player, support, face, yaw, pitch) == null)
+            return false;
+        return findPlacementHitLastReported(player, support, face, yaw, pitch) != null;
+    }
+
+    private static double[] lastReportedEyes(EntityPlayer player) {
+        double posX = player.posX;
+        double posY = player.posY;
+        double posZ = player.posZ;
+        if (player instanceof IAccessorEntityPlayerSP) {
+            IAccessorEntityPlayerSP acc = (IAccessorEntityPlayerSP) player;
+            posX = acc.getLastReportedPosX();
+            posY = acc.getLastReportedPosY();
+            posZ = acc.getLastReportedPosZ();
+        }
+        return new double[] { posX, posY + 1.62, posZ };
+    }
+
+    private static boolean isFaceHit(MovingObjectPosition mop, BlockPos support, EnumFacing face) {
+        return mop != null
+                && mop.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK
+                && mop.getBlockPos() != null
+                && mop.getBlockPos().equals(support)
+                && mop.sideHit == face;
+    }
+
+    public static FaceHit findFaceHitAt(World world, BlockPos support, EnumFacing face,
+            double eyeX, double eyeY, double eyeZ,
+            float baseYaw, float basePitch, float moveYaw, boolean hardAway) {
+        if (world == null || support == null || face == null)
             return null;
         double[] xs = PLACE_OFFSETS;
         double[] ys = PLACE_OFFSETS;
@@ -396,9 +519,6 @@ public final class ScaffoldPlace {
         float reach = 4.5f;
         if (Mc.controller() != null)
             reach = Mc.controller().getBlockReachDistance();
-        double eyeX = player.posX;
-        double eyeY = player.posY + player.getEyeHeight();
-        double eyeZ = player.posZ;
         FaceHit best = null;
         float bestDiff = Float.MAX_VALUE;
         for (double dx : xs) {
@@ -412,12 +532,8 @@ public final class ScaffoldPlace {
                             && Math.abs(ScaffoldRotations.wrap(rot[0] - moveYaw)) < 90f)
                         continue;
                     MovingObjectPosition mop = rayTraceAt(
-                        player.worldObj, eyeX, eyeY, eyeZ, rot[0], rot[1], reach);
-                    if (mop == null
-                            || mop.typeOfHit != MovingObjectPosition.MovingObjectType.BLOCK
-                            || mop.getBlockPos() == null
-                            || !mop.getBlockPos().equals(support)
-                            || mop.sideHit != face)
+                        world, eyeX, eyeY, eyeZ, rot[0], rot[1], reach);
+                    if (!isFaceHit(mop, support, face))
                         continue;
                     float diff = Math.abs(ScaffoldRotations.wrap(rot[0] - baseYaw))
                             + Math.abs(rot[1] - basePitch);
@@ -461,6 +577,43 @@ public final class ScaffoldPlace {
                 break;
         }
         return new Vec3(x, y, z);
+    }
+
+    /**
+     * OpenMyau {@code BlockUtil.getHitVec}: current-eye ray for support+face, else
+     * {@link #clickVec}. Always returns a placeable hit (never null when args valid).
+     */
+    public static Vec3 getHitVec(EntityPlayer player, BlockPos support, EnumFacing face,
+            float yaw, float pitch) {
+        if (support == null || face == null)
+            return null;
+        Vec3 ray = findPlacementHit(player, support, face, yaw, pitch);
+        if (ray != null)
+            return ray;
+        return clickVec(support, face);
+    }
+
+    /**
+     * OpenMyau multiplace clickVec path: aim at {@link #clickVec}, then only accept if a
+     * ray from current eyes with that look still hits {@code support}+{@code face}.
+     * Never return an unverified click point — that was causing client-only ghost blocks.
+     */
+    public static FaceHit verifiedClickHit(EntityPlayer player, BlockPos support, EnumFacing face,
+            float baseYaw, float basePitch) {
+        if (player == null || support == null || face == null || player.worldObj == null)
+            return null;
+        Vec3 click = clickVec(support, face);
+        if (click == null)
+            return null;
+        float[] rot = rotationsTo(click, player, baseYaw, basePitch);
+        // OpenMyau: abandon if the aim snap is too large vs current silent look.
+        if (Math.abs(ScaffoldRotations.wrap(rot[0] - baseYaw)) >= 120.0f
+                || Math.abs(rot[1] - basePitch) >= 60.0f)
+            return null;
+        Vec3 hit = findPlacementHit(player, support, face, rot[0], rot[1]);
+        if (hit == null)
+            return null;
+        return new FaceHit(rot[0], rot[1], hit);
     }
 
     public static Vec3 findPlacementHitAt(World world, BlockPos support, EnumFacing face,

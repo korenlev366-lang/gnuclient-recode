@@ -15,6 +15,7 @@ import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.module.modules.combat.RavenAntiBot;
 import gnu.client.module.modules.combat.ReachModule;
+import gnu.client.module.modules.movement.SpeedModule;
 import gnu.client.module.modules.player.BedNukerModule;
 import gnu.client.module.modules.player.scaffold.ScaffoldModule;
 import gnu.client.module.modules.network.LagrangeModule;
@@ -133,8 +134,8 @@ public final class ClientEventListener {
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public void onRightClickMouse(RightClickMouseEvent event) {
-        // OpenMyau/wsamiaw: Scaffold owns places — vanilla RMB while KeepY-on-press (sword
-        // spoof) sends USE_ITEM / air place then C09 → Grim PacketOrderE/N + place flags.
+        // Scaffold owns places — vanilla RMB while KeepY-on-press can still send USE_ITEM
+        // / air place then C09 → Grim PacketOrderE/N + place flags.
         if (KillAuraModule.shouldCancelVanillaClick()
                 || ScaffoldModule.shouldCancelVanillaClick()
                 || BedNukerModule.shouldCancelVanillaClick())
@@ -166,6 +167,7 @@ public final class ClientEventListener {
     @SubscribeEvent
     public void onJump(JumpEvent event) {
         VelocityModule.patchJump(event);
+        SpeedModule.patchJump(event);
         try {
             ScriptManager.instance().dispatchJump();
         } catch (Throwable ignored) {

@@ -1,5 +1,7 @@
 package gnu.client.module;
 
+import java.util.concurrent.ConcurrentHashMap;
+
 import gnu.client.common.GnuLog;
 import gnu.client.module.modules.visual.NameTagsModule;
 import gnu.client.runtime.ClientBootstrap;
@@ -223,8 +225,21 @@ public final class ModuleManager {
         }
     }
 
+    private static final ConcurrentHashMap<String, Long> LAST_MODULE_ERROR_LOG_MS =
+            new ConcurrentHashMap<>();
+    private static final long MODULE_ERROR_LOG_COOLDOWN_MS = 5000L;
+
     private static void logModuleError(String phase, Module module, Throwable t) {
-        GnuLog.log("module " + phase + " failed name=" + module.getName() + " err=" + t);
-        t.printStackTrace();
+        String name = module != null ? module.getName() : "?";
+        String key = phase + "|" + name + "|" + t.getClass().getName();
+        long now = System.currentTimeMillis();
+        Long prev = LAST_MODULE_ERROR_LOG_MS.put(key, now);
+        if (prev != null && now - prev < MODULE_ERROR_LOG_COOLDOWN_MS)
+            return;
+        String where = "";
+        StackTraceElement[] st = t.getStackTrace();
+        if (st != null && st.length > 0)
+            where = " at " + st[0];
+        GnuLog.log("module " + phase + " failed name=" + name + " err=" + t + where);
     }
 }

@@ -773,7 +773,7 @@ public final class KillAuraModule extends Module implements PacketListener {
         if (!lookHitsAttackTarget(player, attackRange.getValue()))
             return false;
 
-        if (HitSelectModule.shouldBlockClick())
+        if (HitSelectModule.shouldBlockClick(attackTarget))
             return false;
         return Mc.controller() != null;
     }

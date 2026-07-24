@@ -29,9 +29,8 @@ import java.util.Random;
  *
  * <p>Modes:
  * <ul>
- *   <li><b>Burst</b> — after landing a hit, block further clicks for a
- *       predicted hurt window (preventing over-swing while the server
- *       hasn't processed the next invincibility frame).</li>
+ *   <li><b>Burst</b> — after a hit, pause further clicks only while airborne
+ *       (trade / knockback). Falling crits go through; never delays on ground.</li>
  *   <li><b>Criticals</b> — only allow clicks when the player can land a
  *       critical hit (falling, not on ground, not in water, etc.).</li>
  * </ul>
@@ -83,7 +82,7 @@ public final class HitSelectModule extends Module implements PacketListener {
     private final SliderSetting inCombatCancelRate =
             addSetting(new SliderSetting("In combat", 100.0f, 0.0f, 100.0f));
     private final SliderSetting missedSwingsCancelRate =
-            addSetting(new SliderSetting("Missed swings", 100.0f, 0.0f, 100.0f));
+            addSetting(new SliderSetting("Missed swings", 0.0f, 0.0f, 100.0f));
 
     // ────────────────────────────────────────────────────────────────
     // Runtime state
@@ -145,10 +144,21 @@ public final class HitSelectModule extends Module implements PacketListener {
      * @return true if the current click should be blocked (filtered out).
      */
     public static boolean shouldBlockClick() {
+        return shouldBlockClick(null);
+    }
+
+    /**
+     * Raven Burst parity for KillAura: pass the attack target so silent aim is not
+     * treated as a missed swing (mouse-over miss + high cancel rate was delaying only
+     * when looking at the target on ground).
+     *
+     * @param preferredTarget entity being attacked, or {@code null} to use mouse-over
+     */
+    public static boolean shouldBlockClick(Entity preferredTarget) {
         Module mod = ModuleManager.INSTANCE.getModule("Hit Select");
         if (!(mod instanceof HitSelectModule) || !mod.isEnabled())
             return false;
-        return ((HitSelectModule) mod).internalShouldBlock();
+        return ((HitSelectModule) mod).internalShouldBlock(preferredTarget);
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -174,6 +184,7 @@ public final class HitSelectModule extends Module implements PacketListener {
         updateCurrentTarget(nextTarget, player, currentTick);
         updateSelfDamage(player, currentTick);
         updateTargetDamage(currentTick);
+        advanceBurstPauseTimers(player);
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -212,7 +223,7 @@ public final class HitSelectModule extends Module implements PacketListener {
     // Internal click filter
     // ────────────────────────────────────────────────────────────────
 
-    private boolean internalShouldBlock() {
+    private boolean internalShouldBlock(Entity preferredTarget) {
         EntityPlayerSP player = Mc.player();
         WorldClient world = Mc.world();
         if (player == null || world == null)
@@ -220,10 +231,13 @@ public final class HitSelectModule extends Module implements PacketListener {
 
         int currentTick = tickCounter;
 
-        // Re-sync target state from current tick data
-        Entity target = findMouseOverTarget(player, world);
+        // KillAura passes its attack target; legit/AC use mouse-over (raven PreAttack).
+        Entity target = preferredTarget != null && isValidTarget(preferredTarget)
+                && preferredTarget instanceof EntityPlayer
+            ? preferredTarget
+            : findMouseOverTarget(player, world);
         if (target == null) {
-            // Missed swing — apply cancel rate
+            // Missed swing — apply cancel rate (raven default 0%)
             return shouldCancel(missedSwingsCancelRate.getValue());
         }
 
@@ -362,6 +376,12 @@ public final class HitSelectModule extends Module implements PacketListener {
     }
 
     private int getBurstBlockMask(TargetState state, Entity target, int currentTick) {
+        // Burst pause is air-only: grounded swings are never stalled. While airborne,
+        // allow a falling critical through the cooldown window.
+        EntityPlayerSP player = Mc.player();
+        if (player == null || player.onGround || canCriticalHit(player))
+            return 0;
+
         if (useServerAttackTime.getValue()) {
             if (state.lastConfirmedTargetDamageTick >= 0
                     && currentTick - state.lastConfirmedTargetDamageTick < SERVER_COOLDOWN_TICKS) {
@@ -370,13 +390,12 @@ public final class HitSelectModule extends Module implements PacketListener {
             return 0;
         }
 
-        if (!isPredictedBurstWindowActive(state, currentTick))
+        // Pause duration only counts while actively delaying in air (see advanceBurstPauseTimers).
+        if (!state.burstPauseArmed || pauseDuration.getValue() <= 0.0f)
             return 0;
-
-        int pauseTicks = msToTicks(pauseDuration.getValue());
-        return (pauseTicks > 0 && currentTick - state.predictedBurstWindowStartTick < pauseTicks)
-                ? BLOCK_PREDICTED_BURST
-                : 0;
+        if (state.burstPauseAccumMs >= pauseDuration.getValue())
+            return 0;
+        return BLOCK_PREDICTED_BURST;
     }
 
     private boolean isCriticalsBlocked(TargetState state, int currentTick) {
@@ -470,24 +489,57 @@ public final class HitSelectModule extends Module implements PacketListener {
             return;
         }
 
-        // Predicted burst: start the hurt window
-        if (!isPredictedBurstWindowActive(state, currentTick))
-            startPredictedBurstWindow(state, currentTick, HURT_WINDOW_TICKS);
+        // Arm burst pause; timer only accumulates while delaying in air.
+        if (!state.burstPauseArmed)
+            armBurstPause(state);
     }
 
     // ────────────────────────────────────────────────────────────────
-    // Predicted burst window
+    // Burst pause timer (ms — only while airborne delay is active)
     // ────────────────────────────────────────────────────────────────
 
-    private boolean isPredictedBurstWindowActive(TargetState state, int currentTick) {
-        return state.predictedBurstWindowEndTick >= 0
-                && currentTick < state.predictedBurstWindowEndTick;
+    private void armBurstPause(TargetState state) {
+        state.burstPauseArmed = true;
+        state.burstPauseAccumMs = 0L;
+        state.burstPauseLastMs = -1L;
     }
 
-    private void startPredictedBurstWindow(TargetState state, int startTick, int windowTicks) {
-        int hurtWindowTicks = Math.max(1, windowTicks);
-        state.predictedBurstWindowStartTick = startTick;
-        state.predictedBurstWindowEndTick = startTick + hurtWindowTicks;
+    private void clearBurstPause(TargetState state) {
+        state.burstPauseArmed = false;
+        state.burstPauseAccumMs = 0L;
+        state.burstPauseLastMs = -1L;
+    }
+
+    /**
+     * Advance Pause duration only while we would actually block (air + not critting).
+     * Ground / rising-without-crit time must not burn the cooldown.
+     */
+    private void advanceBurstPauseTimers(EntityPlayerSP player) {
+        if (player == null || useServerAttackTime.getValue())
+            return;
+        float need = pauseDuration.getValue();
+        if (need <= 0.0f) {
+            for (TargetState state : targetStates.values())
+                clearBurstPause(state);
+            return;
+        }
+
+        boolean delaying = !player.onGround && !canCriticalHit(player);
+        long now = System.currentTimeMillis();
+        for (TargetState state : targetStates.values()) {
+            if (!state.burstPauseArmed)
+                continue;
+            if (delaying) {
+                if (state.burstPauseLastMs >= 0L)
+                    state.burstPauseAccumMs += now - state.burstPauseLastMs;
+                state.burstPauseLastMs = now;
+                if (state.burstPauseAccumMs >= need)
+                    clearBurstPause(state);
+            } else {
+                // Freeze while on ground or while a falling crit is allowed through.
+                state.burstPauseLastMs = -1L;
+            }
+        }
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -654,8 +706,10 @@ public final class HitSelectModule extends Module implements PacketListener {
         boolean firstSelfHitSeen;
         int lastConfirmedTargetDamageTick = -1;
         int pendingServerConfirmationTick = -1;
-        int predictedBurstWindowStartTick = -1;
-        int predictedBurstWindowEndTick = -1;
+        /** Burst: armed after a passed hit; Pause duration accumulates only in air. */
+        boolean burstPauseArmed;
+        long burstPauseAccumMs;
+        long burstPauseLastMs = -1L;
         int lastObservedTargetHurtTime;
         int rawBlockStartTick = -1;
         int rawBlockMask;

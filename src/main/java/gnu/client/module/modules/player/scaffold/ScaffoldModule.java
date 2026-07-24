@@ -28,9 +28,7 @@ import java.util.Arrays;
 
 /**
  * Silent scaffold bridge (KA-style rotations + MoveFix).
- *
- * <p>Item spoof (OpenMyau): gameplay {@code currentItem} stays on the block stack;
- * render shows the visual spoof slot via {@link gnu.client.runtime.ScaffoldItemSpoofHook}.
+ * Switches to a block hotbar slot while enabled; restores the previous slot on disable.
  */
 public final class ScaffoldModule extends Module {
 
@@ -49,7 +47,8 @@ public final class ScaffoldModule extends Module {
     private final SliderSetting rotMax = addSetting(new SliderSetting("Rotation max", 80f, 1f, 100f, 1f));
     private final BoolSetting placeDebug = addSetting(new BoolSetting("Place debug", false));
 
-    private int spoofSlot = -1;
+    /** Hotbar slot when enabled — restored on disable. */
+    private int previousSlot = -1;
     private int placeSlot = -1;
     /** Last hotbar index we believe the server has (skip redundant C09). */
     private int serverSlot = -1;
@@ -91,7 +90,7 @@ public final class ScaffoldModule extends Module {
     private boolean placedThisTick;
 
     public ScaffoldModule() {
-        super("Scaffold", "Silent bridge scaffold with item spoof", Category.PLAYER);
+        super("Scaffold", "Silent bridge scaffold", Category.PLAYER);
         keepYOnPress.visibleWhen(() -> keepY.getIndex() != KEEPY_OFF);
     }
 
@@ -126,8 +125,8 @@ public final class ScaffoldModule extends Module {
     @Override
     public void onEnable() {
         EntityPlayerSP p = Mc.player();
-        spoofSlot = p != null ? Mc.getHotbarSlot(p) : 0;
-        serverSlot = spoofSlot;
+        previousSlot = p != null ? Mc.getHotbarSlot(p) : 0;
+        serverSlot = previousSlot;
         placeSlot = -1;
         lastSentYaw = lastSentPitch = Float.MIN_VALUE;
         tickRotDeltaYaw = 0.0f;
@@ -176,7 +175,7 @@ public final class ScaffoldModule extends Module {
     @Override
     public void onDisable() {
         clearRotationIfOwned();
-        restoreHotbarToSpoof();
+        restorePreviousHotbar();
         liveTarget = null;
         placeSlot = -1;
         serverSlot = -1;
@@ -187,10 +186,6 @@ public final class ScaffoldModule extends Module {
         tellyRotationTick = 0;
         tellyWasLookingForward = false;
         towering = false;
-    }
-
-    public int getSpoofSlot() {
-        return spoofSlot;
     }
 
     /** Sprint module / keybind must not keep sprint held while Scaffold bridges. */
@@ -272,11 +267,12 @@ public final class ScaffoldModule extends Module {
             RotationState.reset();
     }
 
-    private void restoreHotbarToSpoof() {
+    private void restorePreviousHotbar() {
         EntityPlayerSP player = Mc.player();
-        if (player == null || spoofSlot < 0 || spoofSlot > 8)
+        if (player == null || previousSlot < 0 || previousSlot > 8)
             return;
-        selectHotbarSlot(player, spoofSlot, true);
+        selectHotbarSlot(player, previousSlot, true);
+        previousSlot = -1;
     }
 
     /**
@@ -347,7 +343,7 @@ public final class ScaffoldModule extends Module {
         // KeepY-on-press holds RMB — release any leftover use before C09/place.
         releaseUseIfNeeded(player);
 
-        // OpenMyau: gameplay stays on the block stack; render spoof shows spoofSlot.
+        // Switch to a placeable block stack (normal hotbar switch + C09 when needed).
         selectHotbarSlot(player, placeSlot, true);
 
         World world = Mc.world();
@@ -593,17 +589,13 @@ public final class ScaffoldModule extends Module {
         RotationState.applyState(
             true, lastSentYaw, lastSentPitch, lastSentYaw, MoveFixUtil.SCAFFOLD_MOVE_FIX_PRIORITY);
 
-        // OpenMyau PRE hang clutch: place at onUpdate HEAD while already over air,
-        // BEFORE this tick's living move — SafeWalk not required.
+        // OpenMyau PRE: hang + tower place at onUpdate HEAD (C08 then C03) — never POST.
         // Telly: wait rotationTick (turn-back C03s) before place — OpenMyau rotationTick<=0.
         // Never place ahead-on-solid here (predicted-eye RotationPlace cascade).
         if (!tellyLookForward && liveTarget != null && (hanging || towering)) {
             WorldClient wc = Mc.world();
             if (wc != null && Mc.controller() != null) {
                 placePhase = "HEAD";
-                // OpenMyau waits rotationTick before place, but with sprint we overshoot.
-                // Place early once turn-back look already rays the target from current eyes.
-                // ExtraTelly elevated clutch must not wait on telly turn-back.
                 boolean tellyWait = isKeepYArmed() && !shouldKeepY && tellyRotationTick > 0
                         && !tellyLookReady(player, liveTarget);
                 if (tellyWait) {
@@ -612,6 +604,7 @@ public final class ScaffoldModule extends Module {
                 } else {
                     selectHotbarSlot(player, placeSlot, true);
                     if (towering) {
+                        // OpenMyau PRE: tower place at onUpdate HEAD (C08 then C03).
                         boolean airborne = !player.onGround || hanging || player.motionY > 0.05;
                         placeDebugLog("HEAD tower try under=" + underFeet
                                 + " tgt=" + formatTarget(liveTarget)
@@ -683,7 +676,6 @@ public final class ScaffoldModule extends Module {
         }
 
         // FastPlace rhythm when not clutching; hang/tower never wait on delay.
-        // OpenMyau only places when under-feet is replaceable (or tower) — no ahead-on-solid.
         if (!hanging && !towering && Mc.getRightClickDelay() > 0) {
             placeDebugLog("WALK skip delay=" + Mc.getRightClickDelay()
                     + " under=" + underFeet);
@@ -693,8 +685,6 @@ public final class ScaffoldModule extends Module {
         PlayerUpdateHook.ensureRotationApplied(player);
         selectHotbarSlot(player, placeSlot, true);
 
-        // Post-move re-resolve. Tower must keep UP under-feet — findBridgeTarget was
-        // overwriting to horizontal ahead and tryHangPlaces rejected UP → no tower.
         float moveYaw = MoveFixUtil.movementFacingYaw();
         if (towering) {
             liveTarget = ScaffoldPlace.findTowerTarget(player, world);
@@ -712,8 +702,6 @@ public final class ScaffoldModule extends Module {
         }
 
         if (towering) {
-            // Grounded UP-into-feet clicks fail vanilla but still emit C08 → Grim spam.
-            // OpenMyau-style: place tower only while airborne / already over air.
             boolean airborne = !player.onGround || hanging || player.motionY > 0.05;
             placeDebugLog("WALK tower try under=" + underFeet
                     + " tgt=" + formatTarget(liveTarget)
@@ -729,9 +717,6 @@ public final class ScaffoldModule extends Module {
             else
                 placeDebugLog("WALK tower skip already-placed");
         } else if (hanging) {
-            // OpenMyau only places in UpdateEvent PRE (= HEAD). Same-tick WALK hang
-            // sees lastReported still on the support top → canSeeFace side-face fail,
-            // but only after reaim — that look flicker → RotationPlace. Next HEAD clutches.
             placeDebugLog("WALK hang skip (PRE-only) under=" + underFeet
                     + " placedThisTick=" + placedThisTick
                     + " tgt=" + formatTarget(liveTarget));
@@ -850,8 +835,27 @@ public final class ScaffoldModule extends Module {
             }
         }
 
-        Vec3 hit = ScaffoldPlace.findPlacementHit(
-            player, liveTarget.support, liveTarget.face, yaw, pitch);
+        // Aim so a ray can hit support+face. Never keep a stale hitVec after reaim —
+        // applyPlaceLook may step/quantize, so the mop from the search look can miss.
+        // Tower: OpenMyau getHitVec (current-eye ray, else clickVec) — no lastReported gate.
+        Vec3 hit;
+        if (towering) {
+            Vec3 aimAt = ScaffoldPlace.clickVec(liveTarget.support, liveTarget.face);
+            if (aimAt != null
+                    && ScaffoldPlace.findPlacementHit(
+                        player, liveTarget.support, liveTarget.face, yaw, pitch) == null) {
+                float[] toFace = ScaffoldPlace.rotationsTo(aimAt, player, yaw, pitch);
+                applyPlaceLook(player, toFace[0], toFace[1]);
+                yaw = lastSentYaw;
+                pitch = lastSentPitch;
+                placeDebugLog("reaim tower clickVec");
+            }
+            hit = ScaffoldPlace.getHitVec(
+                player, liveTarget.support, liveTarget.face, yaw, pitch);
+        } else {
+            hit = ScaffoldPlace.findPlacementHit(
+                player, liveTarget.support, liveTarget.face, yaw, pitch);
+        }
         if (hit == null) {
             ScaffoldPlace.FaceHit faceHit = ScaffoldPlace.findFaceHit(
                 player, liveTarget.support, liveTarget.face, yaw, pitch, moveYaw, hardAway);
@@ -859,16 +863,20 @@ public final class ScaffoldModule extends Module {
                 applyPlaceLook(player, faceHit.yaw, faceHit.pitch);
                 yaw = lastSentYaw;
                 pitch = lastSentPitch;
-                hit = faceHit.hit;
-                placeDebugLog("reaim faceHit (OpenMyau offsets)");
+                placeDebugLog("reaim faceHit towering=" + towering);
             } else if (allowPathFill || underClutch) {
-                hit = ScaffoldPlace.clickVec(liveTarget.support, liveTarget.face);
-                if (hit == null)
-                    return skipPlace("no-hitVec " + formatTarget(liveTarget));
-                placeDebugLog("clickVec fallback underClutch=" + underClutch);
+                ScaffoldPlace.FaceHit clickHit = ScaffoldPlace.verifiedClickHit(
+                    player, liveTarget.support, liveTarget.face, yaw, pitch);
+                if (clickHit == null)
+                    return skipPlace("clickVec-unverified " + formatTarget(liveTarget)
+                            + " underClutch=" + underClutch);
+                applyPlaceLook(player, clickHit.yaw, clickHit.pitch);
+                yaw = lastSentYaw;
+                pitch = lastSentPitch;
+                placeDebugLog("clickVec re-ray aim underClutch=" + underClutch);
             } else {
                 return skipPlace("ray-miss y=" + fmt(yaw) + " p=" + fmt(pitch)
-                        + " " + formatTarget(liveTarget));
+                        + " towering=" + towering + " " + formatTarget(liveTarget));
             }
         }
         awayAbs = Math.abs(ScaffoldRotations.wrap(yaw - moveYaw));
@@ -882,6 +890,19 @@ public final class ScaffoldModule extends Module {
         yaw = lastSentYaw;
         pitch = lastSentPitch;
         awayAbs = Math.abs(ScaffoldRotations.wrap(yaw - moveYaw));
+
+        // Final hitVec with the look we will actually send (after step/quantize).
+        if (towering) {
+            // OpenMyau: always place with getHitVec (ray or clickVec fallback).
+            hit = ScaffoldPlace.getHitVec(
+                player, liveTarget.support, liveTarget.face, yaw, pitch);
+        } else {
+            hit = ScaffoldPlace.findPlacementHit(
+                player, liveTarget.support, liveTarget.face, yaw, pitch);
+        }
+        if (hit == null)
+            return skipPlace("final-ray-miss y=" + fmt(yaw) + " p=" + fmt(pitch)
+                    + " towering=" + towering + " " + formatTarget(liveTarget));
 
         selectHotbarSlot(player, placeSlot, true);
         ItemStack stack = player.inventory.getCurrentItem();
@@ -1040,8 +1061,9 @@ public final class ScaffoldModule extends Module {
                     continue;
                 if (Math.abs(newYaw - lastSentYaw) > maxNudge)
                     continue;
-                if (liveTarget != null && ScaffoldPlace.findPlacementHit(
-                        player, liveTarget.support, liveTarget.face, newYaw, lastSentPitch) == null)
+                if (liveTarget != null && !towering
+                        && ScaffoldPlace.findPlacementHit(
+                            player, liveTarget.support, liveTarget.face, newYaw, lastSentPitch) == null)
                     continue;
                 lastSentYaw = newYaw;
                 tickRotDeltaYaw = grim;
