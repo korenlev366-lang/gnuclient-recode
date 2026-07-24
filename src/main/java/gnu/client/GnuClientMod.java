@@ -17,6 +17,7 @@ import gnu.client.module.modules.combat.DisplaceModule;
 import gnu.client.module.modules.combat.TimerRangeModule;
 import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.module.modules.combat.WTapModule;
+import gnu.client.module.modules.misc.AnticheatModule;
 import gnu.client.module.modules.movement.FastStopModule;
 import gnu.client.module.modules.movement.KeepSprintModule;
 import gnu.client.module.modules.movement.SprintModule;
@@ -67,7 +68,7 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
 public class GnuClientMod {
 
     public static final String MOD_ID = "gnuclient";
-    public static final String VERSION = "2.3.0";
+    public static final String VERSION = "2.4.0";
 
     public static GnuClientMod instance;
     public static ModuleManager moduleManager;
@@ -152,6 +153,7 @@ public class GnuClientMod {
         safeRegister(new LagrangeModule());
         safeRegister(new PingFixModule());
         safeRegister(new FreeLookModule());
+        safeRegister(new AnticheatModule());
     }
 
     private void safeRegister(gnu.client.module.Module module) {
